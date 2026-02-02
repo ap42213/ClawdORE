@@ -298,7 +298,11 @@ async fn main() {
     info!("🧠 Learning Engine initialized for deep pattern analysis");
 
     // Track deploys per round for win detection
+    // We keep both current and previous round deploys so we can detect wins
+    // when the Reset transaction comes (which happens AFTER new round starts)
     let mut round_deploys: HashMap<String, (u64, Vec<u8>)> = HashMap::new();
+    let mut previous_round_deploys: HashMap<String, (u64, Vec<u8>)> = HashMap::new();
+    let mut pending_round_clear = false;
 
     // Set up Ctrl+C handler
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -323,8 +327,13 @@ async fn main() {
                 if current_round != last_round_id && last_round_id != 0 {
                     info!("{}", format!("🆕 NEW ROUND DETECTED: {} → {}", last_round_id, current_round).green().bold());
                     
-                    // Clear round deploys for new round
-                    round_deploys.clear();
+                    // IMPORTANT: Save current deploys for win detection
+                    // The Reset transaction will come in this cycle's transactions
+                    // so we need to preserve the deploys until after we process it
+                    previous_round_deploys = round_deploys.clone();
+                    pending_round_clear = true;
+                    info!("📋 Saved {} deploys from round {} for win detection", 
+                        previous_round_deploys.len(), last_round_id);
                     
                     // Try to get the completed round data and add to strategy engine
                     if let Ok(completed) = parser.get_round(last_round_id) {
@@ -644,8 +653,18 @@ async fn main() {
                                     if is_full_ore { "YES ✅" } else { "No" }, ore_earned);
                                 
                                 // FIND AND RECORD ALL WINNERS
+                                // Use previous_round_deploys since round_deploys may have been 
+                                // cleared or started accumulating for the new round
+                                let deploys_to_check = if previous_round_deploys.is_empty() {
+                                    &round_deploys
+                                } else {
+                                    &previous_round_deploys
+                                };
+                                
+                                info!("   📋 Checking {} tracked deploys for winners", deploys_to_check.len());
+                                
                                 let mut winners_found = 0;
-                                for (address, (amount, squares)) in &round_deploys {
+                                for (address, (amount, squares)) in deploys_to_check {
                                     if squares.contains(&(reset.winning_square as u8)) {
                                         let num_squares = squares.len() as u8;
                                         let winner_share = if competition_on_square > 0 {
@@ -803,6 +822,14 @@ async fn main() {
             Err(e) => {
                 warn!("Failed to fetch transactions: {}", e);
             }
+        }
+
+        // Now that we've processed transactions (including Reset), clear if needed
+        if pending_round_clear {
+            round_deploys.clear();
+            previous_round_deploys.clear();
+            pending_round_clear = false;
+            info!("🗑️ Cleared deploy tracking for new round");
         }
 
         // 3. Check treasury and send claim recommendations
