@@ -19,8 +19,8 @@ cmds = [
 [phases.build]
 cmds = [
   "cd clawdbot",
-  "cargo build --release"
+  "cargo build --release --bin simulation-bot"
 ]
 
 [start]
-cmd = "cd clawdbot && ./target/release/monitor-bot"
+cmd = "cd clawdbot && ./target/release/simulation-bot"
