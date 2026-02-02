@@ -255,4 +255,152 @@ impl BotConfig {
         std::fs::write(path, contents)?;
         Ok(())
     }
+
+    /// Load config from environment variables (for Railway/cloud deployment)
+    pub fn from_env() -> Self {
+        let rpc_url = std::env::var("RPC_URL")
+            .unwrap_or_else(|_| "https://api.mainnet-beta.solana.com".to_string());
+        
+        let ws_url = std::env::var("WS_URL").ok();
+        
+        let mode = std::env::var("BOT_MODE")
+            .unwrap_or_else(|_| "simulation".to_string());
+        
+        let keypair_path = std::env::var("KEYPAIR_PATH")
+            .unwrap_or_else(|_| "/app/wallet.json".to_string());
+
+        Self {
+            mode,
+            rpc_url,
+            ws_url,
+            keypair_path,
+            mining: MiningConfig::from_env(),
+            betting: BettingConfig::from_env(),
+            analytics: AnalyticsConfig::from_env(),
+            monitor: MonitorConfig::from_env(),
+        }
+    }
+}
+
+impl MiningConfig {
+    pub fn from_env() -> Self {
+        Self {
+            enabled: std::env::var("MINING_ENABLED")
+                .map(|v| v == "true")
+                .unwrap_or(true),
+            deploy_amount_sol: std::env::var("DEPLOY_AMOUNT_SOL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.1),
+            use_automation: std::env::var("USE_AUTOMATION")
+                .map(|v| v == "true")
+                .unwrap_or(true),
+            max_automation_balance: std::env::var("MAX_AUTOMATION_BALANCE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1.0),
+            min_sol_balance: std::env::var("MIN_SOL_BALANCE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.5),
+            auto_claim_threshold_ore: std::env::var("AUTO_CLAIM_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10.0),
+            strategy: std::env::var("MINING_STRATEGY")
+                .unwrap_or_else(|_| "weighted".to_string()),
+        }
+    }
+}
+
+impl BettingConfig {
+    pub fn from_env() -> Self {
+        Self {
+            enabled: std::env::var("BETTING_ENABLED")
+                .map(|v| v == "true")
+                .unwrap_or(false),
+            bet_percentage: std::env::var("BET_PERCENTAGE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.05),
+            max_bet_sol: std::env::var("MAX_BET_SOL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.5),
+            min_bet_sol: std::env::var("MIN_BET_SOL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.01),
+            risk_tolerance: std::env::var("RISK_TOLERANCE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.5),
+            squares_to_bet: std::env::var("SQUARES_TO_BET")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3),
+            strategy: std::env::var("BETTING_STRATEGY")
+                .unwrap_or_else(|_| "spread".to_string()),
+        }
+    }
+}
+
+impl AnalyticsConfig {
+    pub fn from_env() -> Self {
+        Self {
+            enabled: std::env::var("ANALYTICS_ENABLED")
+                .map(|v| v == "true")
+                .unwrap_or(true),
+            history_depth: std::env::var("HISTORY_DEPTH")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(100),
+            update_interval: std::env::var("UPDATE_INTERVAL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(60),
+            use_database: std::env::var("USE_DATABASE")
+                .map(|v| v == "true")
+                .unwrap_or(false),
+            database_path: std::env::var("DATABASE_PATH").ok(),
+            export_path: std::env::var("EXPORT_PATH").ok(),
+        }
+    }
+}
+
+impl MonitorConfig {
+    pub fn from_env() -> Self {
+        Self {
+            enabled: true,
+            check_interval: std::env::var("CHECK_INTERVAL")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30),
+            track_balance: true,
+            track_rounds: true,
+            track_competition: std::env::var("TRACK_COMPETITION")
+                .map(|v| v == "true")
+                .unwrap_or(false),
+            alerts: AlertConfig::from_env(),
+        }
+    }
+}
+
+impl AlertConfig {
+    pub fn from_env() -> Self {
+        Self {
+            min_balance_sol: std::env::var("MIN_BALANCE_ALERT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.1),
+            round_ending_warning: std::env::var("ROUND_WARNING_SECONDS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
+            large_win_threshold: std::env::var("LARGE_WIN_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(100.0),
+        }
+    }
 }

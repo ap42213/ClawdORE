@@ -42,6 +42,7 @@ rand = "0.8"
 bytemuck = "1.14"
 backoff = { version = "0.4", features = ["tokio"] }
 ctrlc = "3.4"
+bs58 = "0.5"
 
 # HTTP client for API calls
 reqwest = { version = "0.12", features = ["json"] }
