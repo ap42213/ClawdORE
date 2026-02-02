@@ -1,0 +1,12 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "cd clawdbot && cargo build --release"
+  },
+  "deploy": {
+    "startCommand": "cd clawdbot && ./target/release/monitor-bot",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  }
+}

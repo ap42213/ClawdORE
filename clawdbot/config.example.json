@@ -1,0 +1,43 @@
+{
+  "rpc_url": "https://api.mainnet-beta.solana.com",
+  "ws_url": "wss://api.mainnet-beta.solana.com",
+  "keypair_path": "~/.config/solana/id.json",
+  "mining": {
+    "enabled": true,
+    "deploy_amount_sol": 0.1,
+    "use_automation": true,
+    "max_automation_balance": 1.0,
+    "min_sol_balance": 0.5,
+    "auto_claim_threshold_ore": 10.0,
+    "strategy": "weighted"
+  },
+  "betting": {
+    "enabled": false,
+    "bet_percentage": 0.05,
+    "max_bet_sol": 0.5,
+    "min_bet_sol": 0.01,
+    "risk_tolerance": 0.5,
+    "squares_to_bet": 3,
+    "strategy": "spread"
+  },
+  "analytics": {
+    "enabled": true,
+    "history_depth": 100,
+    "update_interval": 60,
+    "use_database": false,
+    "database_path": "./bot_data.db",
+    "export_path": "./analytics.json"
+  },
+  "monitor": {
+    "enabled": true,
+    "check_interval": 30,
+    "track_balance": true,
+    "track_rounds": true,
+    "track_competition": true,
+    "alerts": {
+      "min_balance_sol": 0.1,
+      "round_ending_warning": 300,
+      "large_win_threshold": 100.0
+    }
+  }
+}

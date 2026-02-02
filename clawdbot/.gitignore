@@ -1,0 +1,32 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Config files (keep example)
+config.json
+
+# Data files
+*.db
+*.sqlite
+bot_data.db
+analytics.json
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keypairs (IMPORTANT!)
+*.json
+!config.example.json
+!package.json

@@ -1,0 +1,26 @@
+provider "nixpkgs" {
+  version = "23.05"
+}
+
+packages = [
+  "rustup",
+  "cargo",
+  "gcc",
+  "openssl",
+  "pkg-config"
+]
+
+[phases.setup]
+nixPkgs = ["rustup"]
+cmds = [
+  "rustup default stable"
+]
+
+[phases.build]
+cmds = [
+  "cd clawdbot",
+  "cargo build --release"
+]
+
+[start]
+cmd = "cd clawdbot && ./target/release/monitor-bot"

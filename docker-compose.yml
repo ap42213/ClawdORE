@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  monitor-bot:
+    build: .
+    command: monitor-bot
+    environment:
+      - RUST_LOG=info
+    volumes:
+      - ./clawdbot/config.json:/app/config.json
+      - ~/.config/solana:/root/.config/solana:ro
+    restart: unless-stopped
+
+  analytics-bot:
+    build: .
+    command: analytics-bot
+    environment:
+      - RUST_LOG=info
+    volumes:
+      - ./clawdbot/config.json:/app/config.json
+      - ~/.config/solana:/root/.config/solana:ro
+    restart: unless-stopped
+
+  # miner-bot:
+  #   build: .
+  #   command: miner-bot
+  #   environment:
+  #     - RUST_LOG=info
+  #   volumes:
+  #     - ./clawdbot/config.json:/app/config.json
+  #     - ~/.config/solana:/root/.config/solana:ro
+  #   restart: unless-stopped
+
+  # betting-bot:
+  #   build: .
+  #   command: betting-bot
+  #   environment:
+  #     - RUST_LOG=info
+  #   volumes:
+  #     - ./clawdbot/config.json:/app/config.json
+  #     - ~/.config/solana:/root/.config/solana:ro
+  #   restart: unless-stopped

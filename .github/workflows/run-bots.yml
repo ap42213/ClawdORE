@@ -1,0 +1,90 @@
+name: Run ClawdBot
+
+on:
+  workflow_dispatch:  # Manual trigger
+  schedule:
+    - cron: '0 */4 * * *'  # Run every 4 hours
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: clawdbot/target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: Build ClawdBot
+        run: |
+          cd clawdbot
+          cargo build --release --bin monitor-bot
+      
+      - name: Setup config
+        run: |
+          cd clawdbot
+          cp config.example.json config.json
+          # You would need to set up secrets for your actual config
+      
+      - name: Run Monitor Bot
+        env:
+          RUST_LOG: info
+        run: |
+          cd clawdbot
+          timeout 3m ./target/release/monitor-bot || true
+      
+      - name: Upload logs
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: bot-logs
+          path: '*.log'
+
+  analytics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      
+      - name: Build ClawdBot
+        run: |
+          cd clawdbot
+          cargo build --release --bin analytics-bot
+      
+      - name: Setup config
+        run: |
+          cd clawdbot
+          cp config.example.json config.json
+      
+      - name: Run Analytics Bot
+        env:
+          RUST_LOG: info
+        run: |
+          cd clawdbot
+          timeout 5m ./target/release/analytics-bot || true
+      
+      - name: Upload analytics
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: analytics-data
+          path: 'clawdbot/analytics.json'

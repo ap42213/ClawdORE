@@ -1,0 +1,20 @@
+# Ignore node_modules
+node_modules
+
+# Ignore build outputs
+.next
+out
+dist
+
+# Ignore env files
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Ignore OS files
+.DS_Store
+
+# Ignore IDE
+.vscode
+.idea
