@@ -3,16 +3,20 @@ use clawdbot::{
     bot::BotStatus,
     client::OreClient,
     config::{AnalyticsConfig, BotConfig},
+    db::is_database_available,
     error::Result,
 };
-use log::{error, info};
+use log::{error, info, warn};
 use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
 use std::sync::{Arc, RwLock};
 use tokio::time::{sleep, Duration};
 
-/// Load keypair from file path or from environment variable
+#[cfg(feature = "database")]
+use clawdbot::db::{SharedDb, Signal, SignalType};
+
+const BOT_NAME: &str = "analytics-bot";
+
 fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
-    // First try environment variable (for Railway - base58 private key)
     if let Ok(keypair_b58) = std::env::var("KEYPAIR_B58") {
         let bytes = bs58::decode(&keypair_b58)
             .into_vec()
@@ -21,7 +25,6 @@ fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
             .map_err(|e| format!("Failed to create keypair from bytes: {}", e));
     }
     
-    // Try KEYPAIR_JSON (JSON array format)
     if let Ok(keypair_json) = std::env::var("KEYPAIR_JSON") {
         let bytes: Vec<u8> = serde_json::from_str(&keypair_json)
             .map_err(|e| format!("Failed to parse keypair JSON: {}", e))?;
@@ -29,7 +32,6 @@ fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
             .map_err(|e| format!("Failed to create keypair from bytes: {}", e));
     }
     
-    // Try file path
     read_keypair_file(keypair_path)
         .map_err(|e| format!("Failed to read keypair file '{}': {}", keypair_path, e))
 }
@@ -40,9 +42,24 @@ struct AnalyticsBot {
     config: AnalyticsConfig,
     client: Arc<OreClient>,
     engine: Arc<RwLock<AnalyticsEngine>>,
+    #[cfg(feature = "database")]
+    db: Option<SharedDb>,
 }
 
 impl AnalyticsBot {
+    #[cfg(feature = "database")]
+    fn new(config: AnalyticsConfig, client: Arc<OreClient>, db: Option<SharedDb>) -> Self {
+        Self {
+            name: "Analytics".to_string(),
+            status: Arc::new(RwLock::new(BotStatus::Idle)),
+            config,
+            client,
+            engine: Arc::new(RwLock::new(AnalyticsEngine::new())),
+            db,
+        }
+    }
+
+    #[cfg(not(feature = "database"))]
     fn new(config: AnalyticsConfig, client: Arc<OreClient>) -> Self {
         Self {
             name: "Analytics".to_string(),
@@ -57,7 +74,6 @@ impl AnalyticsBot {
         info!("📊 Analytics bot started");
 
         loop {
-            // Check status
             {
                 let status = self.status.read().unwrap();
                 if *status == BotStatus::Stopped {
@@ -69,16 +85,27 @@ impl AnalyticsBot {
                 }
             }
 
-            // Collect round data
+            // Send heartbeat
+            #[cfg(feature = "database")]
+            if let Some(ref db) = self.db {
+                let signal = Signal::new(
+                    SignalType::Heartbeat,
+                    BOT_NAME,
+                    serde_json::json!({
+                        "status": "analyzing",
+                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                    }),
+                );
+                db.send_signal(&signal).await.ok();
+            }
+
             let board = self.client.get_board()?;
             let current_round = board.round_id;
 
             info!("📈 Collecting analytics for round {}", current_round);
 
-            // Fetch historical rounds
             let rounds = self.client.get_rounds(current_round, self.config.history_depth)?;
 
-            // Update analytics engine
             {
                 let mut engine = self.engine.write().unwrap();
                 engine.clear_history();
@@ -88,31 +115,42 @@ impl AnalyticsBot {
                 }
             }
 
-            // Generate analytics
             let analytics = {
                 let engine = self.engine.read().unwrap();
                 engine.get_overall_analytics()?
             };
 
-            // Display analytics
             self.display_analytics(&analytics)?;
 
-            // Export if configured
-            if let Some(export_path) = &self.config.export_path {
-                let engine = self.engine.read().unwrap();
-                engine.export_to_json(export_path)?;
-                info!("📁 Analytics exported to {}", export_path);
+            // Store analytics in database
+            #[cfg(feature = "database")]
+            if let Some(ref db) = self.db {
+                db.set_state("analytics_summary", serde_json::json!({
+                    "total_rounds_analyzed": analytics.total_rounds_analyzed,
+                    "total_sol_deployed": analytics.total_sol_deployed,
+                    "most_winning_square": analytics.most_winning_square,
+                    "least_winning_square": analytics.least_winning_square,
+                    "updated_at": chrono::Utc::now().to_rfc3339(),
+                })).await.ok();
             }
 
-            // Get predictions
             let predictions = {
                 let engine = self.engine.read().unwrap();
                 engine.predict_winning_squares(5)?
             };
 
-            info!("🔮 Predicted top 5 squares for next round: {:?}", predictions);
+            info!("🔮 Predicted top 5 squares: {:?}", predictions);
 
-            // Sleep before next update
+            // Store predictions
+            #[cfg(feature = "database")]
+            if let Some(ref db) = self.db {
+                db.set_state("analytics_predictions", serde_json::json!({
+                    "top_squares": predictions,
+                    "confidence": 0.5,
+                    "updated_at": chrono::Utc::now().to_rfc3339(),
+                })).await.ok();
+            }
+
             sleep(Duration::from_secs(self.config.update_interval)).await;
         }
 
@@ -132,11 +170,9 @@ impl AnalyticsBot {
         println!("║                  SQUARE STATISTICS                    ║");
         println!("╠═══════════════════════════════════════════════════════╣");
 
-        // Sort squares by win frequency
         let mut sorted_stats = analytics.square_statistics.clone();
         sorted_stats.sort_by(|a, b| b.win_frequency.partial_cmp(&a.win_frequency).unwrap());
 
-        // Display top 10 squares
         for (i, stats) in sorted_stats.iter().take(10).enumerate() {
             println!(
                 "║ #{:2}. Square #{:2} | Wins: {:4} | Win%: {:5.2}% | Avg: {:8} ║",
@@ -162,15 +198,46 @@ impl AnalyticsBot {
 
 #[tokio::main]
 async fn main() {
-    // Initialize logger with RUST_LOG env var support
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("info")
     ).init();
 
+    println!(r#"
+    ╔═══════════════════════════════════════════════════════════════════════╗
+    ║                                                                       ║
+    ║    █████╗ ███╗   ██╗ █████╗ ██╗  ██╗   ██╗████████╗██╗ ██████╗███████╗║
+    ║   ██╔══██╗████╗  ██║██╔══██╗██║  ╚██╗ ██╔╝╚══██╔══╝██║██╔════╝██╔════╝║
+    ║   ███████║██╔██╗ ██║███████║██║   ╚████╔╝    ██║   ██║██║     ███████╗║
+    ║   ██╔══██║██║╚██╗██║██╔══██║██║    ╚██╔╝     ██║   ██║██║     ╚════██║║
+    ║   ██║  ██║██║ ╚████║██║  ██║███████╗██║      ██║   ██║╚██████╗███████║║
+    ║   ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝      ╚═╝   ╚═╝ ╚═════╝╚══════╝║
+    ║                                                                       ║
+    ║                ORE Analytics Bot - Pattern Analysis                   ║
+    ╚═══════════════════════════════════════════════════════════════════════╝
+    "#);
+
     info!("📊 ORE Analytics Bot Starting...");
     info!("═══════════════════════════════════════════════════════════════");
 
-    // Load configuration from env or file
+    // Check database
+    #[cfg(feature = "database")]
+    let db = if is_database_available() {
+        info!("✅ Database URL found");
+        match SharedDb::connect().await {
+            Ok(db) => {
+                info!("✅ Database connected");
+                Some(db)
+            }
+            Err(e) => {
+                warn!("⚠️ Database connection failed: {} - running standalone", e);
+                None
+            }
+        }
+    } else {
+        info!("ℹ️ No DATABASE_URL - running standalone mode");
+        None
+    };
+
     let config = if std::env::var("RPC_URL").is_ok() {
         info!("📋 Loading config from environment variables");
         BotConfig::from_env()
@@ -179,50 +246,32 @@ async fn main() {
             .nth(1)
             .unwrap_or_else(|| "config.json".to_string());
         
-        info!("📋 Loading config from: {}", config_path);
-        
         match std::fs::read_to_string(&config_path) {
-            Ok(data) => {
-                match serde_json::from_str(&data) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        error!("Failed to parse config: {}", e);
-                        return;
-                    }
-                }
-            }
-            Err(_) => {
-                info!("📋 No config file found, using defaults with env vars");
-                BotConfig::from_env()
-            }
+            Ok(data) => serde_json::from_str(&data).unwrap_or_else(|_| BotConfig::from_env()),
+            Err(_) => BotConfig::from_env(),
         }
     };
 
-    // Load keypair
     let keypair = match load_keypair(&config.keypair_path) {
         Ok(kp) => kp,
         Err(e) => {
             error!("Failed to load keypair: {}", e);
-            error!("");
-            error!("Set one of:");
-            error!("  - KEYPAIR_B58 (base58 encoded private key)");
-            error!("  - KEYPAIR_JSON (JSON array of bytes)");
-            error!("  - KEYPAIR_PATH pointing to a keypair file");
             return;
         }
     };
 
     info!("📡 RPC: {}", config.rpc_url);
     info!("🔑 Wallet: {}", keypair.pubkey());
-    info!("📊 History Depth: {} rounds", config.analytics.history_depth);
-    info!("⏱️ Update Interval: {} seconds", config.analytics.update_interval);
     info!("═══════════════════════════════════════════════════════════════");
 
-    // Create client
     let client = OreClient::new(config.rpc_url.clone(), keypair);
 
-    // Create and run analytics bot
+    #[cfg(feature = "database")]
+    let mut analytics_bot = AnalyticsBot::new(config.analytics.clone(), Arc::new(client), db);
+    
+    #[cfg(not(feature = "database"))]
     let mut analytics_bot = AnalyticsBot::new(config.analytics.clone(), Arc::new(client));
+
     if let Err(e) = analytics_bot.start().await {
         error!("Analytics bot error: {}", e);
     }
