@@ -7,7 +7,7 @@ pub mod analytics;
 pub mod monitor;
 pub mod utils;
 pub mod ore_round;
-pub mod simulation;
+pub mod blockchain_parser;
 
 pub use bot::*;
 pub use client::*;
@@ -16,3 +16,4 @@ pub use error::*;
 pub use strategy::*;
 pub use analytics::*;
 pub use monitor::*;
+pub use blockchain_parser::*;

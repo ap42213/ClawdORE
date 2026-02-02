@@ -28,11 +28,18 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy binaries from builder
-COPY --from=builder /app/target/release/simulation-bot /app/
 COPY --from=builder /app/target/release/monitor-bot /app/
+COPY --from=builder /app/target/release/parser-bot /app/
 COPY --from=builder /app/target/release/miner-bot /app/
 COPY --from=builder /app/target/release/betting-bot /app/
 COPY --from=builder /app/target/release/analytics-bot /app/
 
-# Default to simulation bot
-CMD ["./simulation-bot"]
+# Create startup script that selects bot based on BOT_TYPE env var
+RUN echo '#!/bin/sh\n\
+BOT=${BOT_TYPE:-parser-bot}\n\
+echo "Starting $BOT..."\n\
+exec /app/$BOT\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Default to parser bot via start script
+CMD ["/app/start.sh"]

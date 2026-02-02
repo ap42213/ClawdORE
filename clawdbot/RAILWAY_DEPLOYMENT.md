@@ -3,12 +3,23 @@
 ## 🚂 Railway Configuration
 
 ### Build Settings (Auto-detected)
-- **Builder**: Nixpacks
-- **Build Command**: `cargo build --release --bin simulation-bot` (auto-detected from Cargo.toml)
-- **Start Command**: `./target/release/simulation-bot`
+- **Builder**: Docker (using Dockerfile)
+- **Start Command**: Auto-selects bot based on `BOT_TYPE` env var
 
 ### Root Directory
 Set to: `clawdbot`
+
+---
+
+## 🤖 Available Bots
+
+| Bot | `BOT_TYPE` Value | Description |
+|-----|-----------------|-------------|
+| **Parser Bot** | `parser-bot` (default) | Expert blockchain parser - monitors ALL ORE transactions |
+| **Monitor Bot** | `monitor-bot` | Read-only monitoring of ORE rounds |
+| **Miner Bot** | `miner-bot` | Automated mining (requires `BOT_MODE=live`) |
+| **Betting Bot** | `betting-bot` | Automated betting (requires `BOT_MODE=live`) |
+| **Analytics Bot** | `analytics-bot` | Collects and displays ORE statistics |
 
 ---
 
@@ -33,13 +44,24 @@ You can use **ONE** of these:
 
 ---
 
-## 🎮 Simulation Settings (Optional)
+## 🎮 Bot Selection & Mode
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `BOT_TYPE` | `parser-bot` | Which bot to run (see table above) |
 | `BOT_MODE` | `simulation` | `simulation`, `monitor`, or `live` |
-| `SIMULATION_BALANCE` | `10.0` | Starting simulated SOL balance |
 | `RUST_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+
+⚠️ **Important**: Set `BOT_MODE=live` only if you want real transactions!
+
+---
+
+## 🔍 Parser Bot Settings (Optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PARSER_INTERVAL` | `30` | Seconds between parsing updates |
+| `PARSER_TX_LIMIT` | `50` | Number of transactions to fetch per cycle |
 
 ---
 
@@ -99,14 +121,31 @@ Go to **Variables** tab and add:
 ```
 RPC_URL=https://api.mainnet-beta.solana.com
 KEYPAIR_B58=your_base58_private_key_here
-BOT_MODE=simulation
-SIMULATION_BALANCE=10.0
-MINING_STRATEGY=weighted
+BOT_TYPE=parser-bot
+PARSER_INTERVAL=30
+PARSER_TX_LIMIT=50
 RUST_LOG=info
 ```
 
 ### Step 4: Deploy
 Railway will automatically build and deploy!
+
+---
+
+## 🔄 Running Multiple Bots
+
+To run multiple bots, create separate Railway services in the same project:
+
+1. **Service 1: Simulation Bot**
+   - `BOT_TYPE=simulation-bot`
+   
+2. **Service 2: Monitor Bot**  
+   - `BOT_TYPE=monitor-bot`
+
+3. **Service 3: Analytics Bot**
+   - `BOT_TYPE=analytics-bot`
+
+All services can share the same `RPC_URL` and `KEYPAIR_B58` variables.
 
 ---
 

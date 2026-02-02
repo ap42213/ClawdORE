@@ -13,6 +13,7 @@ entropy-api = { git = "https://github.com/regolith-labs/entropy", branch = "mast
 solana-sdk = "=2.1.0"
 solana-client = "=2.1.0"
 solana-program = "=2.1.0"
+solana-transaction-status = "=2.1.0"
 
 # Pin dependencies to avoid edition2024 / Rust 1.85+ requirement
 blake3 = "=1.5.4"
@@ -71,5 +72,5 @@ name = "monitor-bot"
 path = "src/bin/monitor_bot.rs"
 
 [[bin]]
-name = "simulation-bot"
-path = "src/bin/simulation_bot.rs"
+name = "parser-bot"
+path = "src/bin/parser_bot.rs"
