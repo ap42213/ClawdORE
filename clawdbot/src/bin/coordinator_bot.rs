@@ -2,11 +2,11 @@ use clawdbot::{
     blockchain_parser::{BlockchainParser, OreInstructionType},
     config::BotConfig,
     db::{is_database_available, Signal, SignalType},
+    strategies::{StrategyEngine, RoundHistory, StrategyRecommendation},
 };
 use colored::*;
 use log::{error, info, warn};
 use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
-use std::collections::HashMap;
 use tokio::time::{sleep, Duration};
 
 #[cfg(feature = "database")]
@@ -137,6 +137,14 @@ async fn main() {
     let mut last_round_id: u64 = 0;
     let mut last_slot: u64 = 0;
     let mut round_start_detected = false;
+    
+    // Initialize strategy engine
+    let mut strategy_engine = StrategyEngine::new();
+    info!("🧠 Strategy Engine initialized with 10 strategies:");
+    info!("   • Momentum, Contrarian Value, Edge Hunting");
+    info!("   • Streak Reversal, Low Competition, Whale Following");
+    info!("   • Pattern Detection, Kelly Criterion, Quadrant Analysis");
+    info!("   • Mean Reversion, Consensus (weighted combination)");
 
     // Set up Ctrl+C handler
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -160,6 +168,22 @@ async fn main() {
                 // Detect new round
                 if current_round != last_round_id && last_round_id != 0 {
                     info!("{}", format!("🆕 NEW ROUND DETECTED: {} → {}", last_round_id, current_round).green().bold());
+                    
+                    // Try to get the completed round data and add to strategy engine
+                    if let Ok(completed) = parser.get_round(last_round_id) {
+                        // TODO: Get actual winning square from completed round
+                        // For now, we'll track the deployment pattern
+                        let round_history = RoundHistory {
+                            round_id: last_round_id,
+                            winning_square: 0, // Would need to detect from blockchain
+                            deployed: completed.deployed,
+                            total_pot: completed.deployed.iter().sum(),
+                            motherlode: false,
+                            timestamp: None,
+                        };
+                        strategy_engine.add_round(round_history);
+                        info!("📚 Added round {} to strategy history", last_round_id);
+                    }
                     
                     #[cfg(feature = "database")]
                     if let Some(ref db) = db {
@@ -207,42 +231,96 @@ async fn main() {
                         }
                     }
 
-                    // Analyze squares and send signals
-                    let mut hot_squares = Vec::new();
-                    let mut cold_squares = Vec::new();
-                    let avg_deploy = total_deployed / 25;
-
-                    for (i, &amount) in current.deployed.iter().enumerate() {
-                        if amount > avg_deploy * 2 {
-                            hot_squares.push((i, amount));
-                        } else if amount == 0 && total_deployed > 0 {
-                            cold_squares.push(i);
+                    // Run strategy analysis
+                    let recommendations = strategy_engine.get_recommendations(&current.deployed);
+                    let consensus = strategy_engine.get_consensus_recommendation(&current.deployed);
+                    
+                    // Display top strategies
+                    info!("\n{}", "═══ STRATEGY ANALYSIS ═══".yellow().bold());
+                    
+                    for (i, rec) in recommendations.iter().take(5).enumerate() {
+                        if rec.confidence > 0.2 && !rec.squares.is_empty() {
+                            let emoji = match i {
+                                0 => "🥇",
+                                1 => "🥈",
+                                2 => "🥉",
+                                _ => "📊",
+                            };
+                            info!("{} {} (conf: {:.0}%): {:?}", 
+                                emoji, 
+                                rec.strategy_name.bright_white(),
+                                rec.confidence * 100.0,
+                                rec.squares);
+                            info!("   └─ {}", rec.reasoning.dimmed());
                         }
                     }
+                    
+                    // Display consensus recommendation
+                    if !consensus.squares.is_empty() {
+                        info!("\n{}", "🎯 CONSENSUS RECOMMENDATION".green().bold());
+                        info!("   Squares: {:?}", consensus.squares);
+                        info!("   Weights: {:?}", consensus.weights.iter()
+                            .map(|w| format!("{:.1}%", w * 100.0))
+                            .collect::<Vec<_>>());
+                        info!("   Confidence: {:.0}%", consensus.confidence * 100.0);
+                    }
 
-                    if !hot_squares.is_empty() {
-                        info!("🔥 Hot squares: {:?}", hot_squares.iter().map(|(i, _)| i).collect::<Vec<_>>());
+                    // Send strategy signals to database
+                    #[cfg(feature = "database")]
+                    if let Some(ref db) = db {
+                        // Send consensus recommendation as deploy opportunity
+                        if consensus.confidence > 0.4 && !consensus.squares.is_empty() {
+                            let signal = Signal::deploy_opportunity(
+                                BOT_NAME, 
+                                consensus.squares.clone(),
+                                &format!("Consensus ({:.0}% confidence) - {}", 
+                                    consensus.confidence * 100.0,
+                                    consensus.reasoning)
+                            );
+                            db.send_signal(&signal).await.ok();
+                        }
                         
-                        #[cfg(feature = "database")]
-                        if let Some(ref db) = db {
-                            for (square, amount) in &hot_squares {
-                                let signal = Signal::hot_square(BOT_NAME, *square, *amount);
+                        // Send top strategy as separate signal
+                        if let Some(top) = recommendations.first() {
+                            if top.confidence > 0.5 {
+                                let signal = Signal::new(
+                                    SignalType::DeployOpportunity,
+                                    BOT_NAME,
+                                    serde_json::json!({
+                                        "strategy": top.strategy_name,
+                                        "squares": top.squares,
+                                        "weights": top.weights,
+                                        "confidence": top.confidence,
+                                        "expected_roi": top.expected_roi,
+                                        "reasoning": top.reasoning
+                                    }),
+                                );
                                 db.send_signal(&signal).await.ok();
                             }
                         }
-                    }
-
-                    if !cold_squares.is_empty() && cold_squares.len() <= 10 {
-                        info!("❄️  Cold squares (contrarian opportunity): {:?}", cold_squares);
                         
-                        #[cfg(feature = "database")]
-                        if let Some(ref db) = db {
-                            for square in &cold_squares {
-                                let signal = Signal::cold_square(BOT_NAME, *square);
-                                db.send_signal(&signal).await.ok();
-                            }
-                        }
+                        // Store all strategy recommendations as state
+                        let strategies_json: Vec<serde_json::Value> = recommendations.iter()
+                            .filter(|r| r.confidence > 0.2)
+                            .map(|r| serde_json::json!({
+                                "name": r.strategy_name,
+                                "squares": r.squares,
+                                "weights": r.weights,
+                                "confidence": r.confidence,
+                                "expected_roi": r.expected_roi,
+                                "reasoning": r.reasoning
+                            }))
+                            .collect();
+                        
+                        db.set_state("current_strategies", serde_json::json!(strategies_json)).await.ok();
+                        db.set_state("consensus_recommendation", serde_json::json!({
+                            "squares": consensus.squares,
+                            "weights": consensus.weights,
+                            "confidence": consensus.confidence
+                        })).await.ok();
                     }
+                    
+                    info!("");
                 }
 
                 last_round_id = current_round;
@@ -277,6 +355,22 @@ async fn main() {
                         };
                         
                         db.insert_transaction(&db_tx).await.ok();
+                    }
+                }
+                
+                // Track whales (deployers with > 1 SOL)
+                for tx in &transactions {
+                    if let Some(ref deploy) = tx.deploy_data {
+                        if deploy.amount_lamports > 1_000_000_000 { // > 1 SOL = whale
+                            strategy_engine.track_whale(
+                                tx.signer.clone(),
+                                deploy.squares.iter().map(|&s| s as usize).collect()
+                            );
+                            info!("🐋 Whale detected: {} deployed {:.2} SOL to squares {:?}",
+                                &tx.signer[..8],
+                                deploy.amount_lamports as f64 / 1_000_000_000.0,
+                                deploy.squares);
+                        }
                     }
                 }
 
