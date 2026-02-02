@@ -13,8 +13,6 @@ entropy-api = { git = "https://github.com/regolith-labs/entropy", branch = "mast
 solana-sdk = "=2.1.0"
 solana-client = "=2.1.0"
 solana-program = "=2.1.0"
-anchor-client = "0.30"
-anchor-lang = "0.30"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
