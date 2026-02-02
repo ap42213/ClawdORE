@@ -4,19 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Solana dependencies - pinned to 2.1.0 for ore-api compatibility
+# ORE dependencies (these bring in compatible Solana/SPL versions)
+ore-api = { git = "https://github.com/regolith-labs/ore", branch = "master" }
+ore-mint-api = { git = "https://github.com/regolith-labs/ore-mint", branch = "master" }
+entropy-api = { git = "https://github.com/regolith-labs/entropy", branch = "master" }
+
+# Solana dependencies - match ore-api requirements
 solana-sdk = "=2.1.0"
 solana-client = "=2.1.0"
 solana-program = "=2.1.0"
 anchor-client = "0.30"
 anchor-lang = "0.30"
-spl-token = "6.0"
-spl-associated-token-account = "5.0"
-
-# ORE dependencies
-ore-api = { git = "https://github.com/regolith-labs/ore", branch = "master" }
-ore-mint-api = { git = "https://github.com/regolith-labs/ore-mint", branch = "master" }
-entropy-api = { git = "https://github.com/regolith-labs/entropy", branch = "master" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -40,7 +38,6 @@ rand = "0.8"
 bytemuck = "1.14"
 backoff = { version = "0.4", features = ["tokio"] }
 ctrlc = "3.4"
-zeroize = "1.8"
 
 # HTTP client for API calls
 reqwest = { version = "0.12", features = ["json"] }
