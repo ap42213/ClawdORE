@@ -5,13 +5,13 @@ edition = "2021"
 
 [dependencies]
 # Solana dependencies
-solana-sdk = "^2.1"
-solana-client = "^2.1"
-solana-program = "^2.1"
+solana-sdk = "2.1"
+solana-client = "2.1"
+solana-program = "2.1"
 anchor-client = "0.30"
 anchor-lang = "0.30"
-spl-token = "^4"
-spl-associated-token-account = "^2"
+spl-token = "6.0"
+spl-associated-token-account = "5.0"
 
 # ORE dependencies
 ore-api = { git = "https://github.com/regolith-labs/ore", branch = "master" }
