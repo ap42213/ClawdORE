@@ -14,9 +14,9 @@ spl-token = "^4"
 spl-associated-token-account = "^2"
 
 # ORE dependencies
-ore-api = { path = "../ore/api" }
-ore-mint-api = { path = "../ore-mint/api" }
-entropy-api = { path = "../entropy/api" }
+ore-api = { git = "https://github.com/regolith-labs/ore", branch = "master" }
+ore-mint-api = { git = "https://github.com/regolith-labs/ore-mint", branch = "master" }
+entropy-api = { git = "https://github.com/regolith-labs/entropy", branch = "master" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
