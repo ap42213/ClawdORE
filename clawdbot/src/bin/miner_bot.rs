@@ -1,18 +1,35 @@
 use clawdbot::{
+    blockchain_parser::BlockchainParser,
     bot::BotStatus,
     client::OreClient,
-    config::{BotConfig, MiningConfig},
+    config::BotConfig,
+    db::is_database_available,
     error::Result,
-    strategy::MiningStrategy,
+    ore_strategy::{OreStrategyEngine, DeployDecision, CompetitionLevel, PlayerPerformance, SquareCountStats},
 };
+use colored::*;
 use log::{error, info, warn};
 use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
 use std::sync::{Arc, RwLock};
 use tokio::time::{sleep, Duration};
 
+#[cfg(feature = "database")]
+use clawdbot::db::SharedDb;
+
+/// ORE Game Configuration
+/// Key rules from user:
+/// - Can pick 1-25 squares per round
+/// - Min wallet: 0.05 SOL
+/// - Max bet per round: 0.04 SOL total (divided by squares)
+/// - Target low deployed rounds for better ORE splits
+/// - Maximize rounds played while extracting max ORE
+
+const MIN_WALLET_SOL: f64 = 0.05;
+const MAX_BET_PER_ROUND_SOL: f64 = 0.04;
+const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
+
 /// Load keypair from file path or from environment variable
 fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
-    // First try environment variable (for Railway - base58 private key)
     if let Ok(keypair_b58) = std::env::var("KEYPAIR_B58") {
         let bytes = bs58::decode(&keypair_b58)
             .into_vec()
@@ -21,7 +38,6 @@ fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
             .map_err(|e| format!("Failed to create keypair from bytes: {}", e));
     }
     
-    // Try KEYPAIR_JSON (JSON array format)
     if let Ok(keypair_json) = std::env::var("KEYPAIR_JSON") {
         let bytes: Vec<u8> = serde_json::from_str(&keypair_json)
             .map_err(|e| format!("Failed to parse keypair JSON: {}", e))?;
@@ -29,35 +45,173 @@ fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
             .map_err(|e| format!("Failed to create keypair from bytes: {}", e));
     }
     
-    // Try file path
     read_keypair_file(keypair_path)
         .map_err(|e| format!("Failed to read keypair file '{}': {}", keypair_path, e))
 }
 
-struct MinerBot {
+/// Smart ORE Miner Bot
+/// Learns from ALL on-chain players to optimize:
+/// 1. Number of squares to play
+/// 2. When to play (competition level)
+/// 3. Which squares to pick
+/// 4. Budget per round
+struct SmartMinerBot {
     name: String,
     status: Arc<RwLock<BotStatus>>,
-    config: MiningConfig,
-    client: Arc<OreClient>,
-    strategy: MiningStrategy,
+    ore_strategy: OreStrategyEngine,
+    parser: BlockchainParser,
+    keypair: Keypair,
+    rpc_url: String,
+    mode: String, // "simulation" or "live"
+    
+    // Tracking
+    rounds_played: u32,
+    rounds_won: u32,
+    total_deployed: u64,
+    total_won: u64,
+    ore_earned: f64,
 }
 
-impl MinerBot {
-    fn new(config: MiningConfig, client: Arc<OreClient>) -> Self {
-        let strategy = MiningStrategy::new(config.strategy.clone());
+impl SmartMinerBot {
+    async fn new(
+        rpc_url: String, 
+        keypair: Keypair, 
+        mode: String,
+    ) -> Result<Self> {
+        let parser = BlockchainParser::new(&rpc_url)?;
         
-        Self {
-            name: "Miner".to_string(),
+        let mut ore_strategy = OreStrategyEngine::new();
+        ore_strategy.min_wallet_sol = MIN_WALLET_SOL;
+        ore_strategy.max_bet_per_round_sol = MAX_BET_PER_ROUND_SOL;
+        
+        Ok(Self {
+            name: "SmartMiner".to_string(),
             status: Arc::new(RwLock::new(BotStatus::Idle)),
-            config,
-            client,
-            strategy,
+            ore_strategy,
+            parser,
+            keypair,
+            rpc_url,
+            mode,
+            rounds_played: 0,
+            rounds_won: 0,
+            total_deployed: 0,
+            total_won: 0,
+            ore_earned: 0.0,
+        })
+    }
+
+    /// Load learned strategies from database
+    #[cfg(feature = "database")]
+    async fn load_learned_data(&mut self, db: &SharedDb) {
+        info!("📚 Loading learned strategies from database...");
+        
+        // Load all player performance data
+        if let Ok(players) = db.load_all_players().await {
+            if !players.is_empty() {
+                let count = players.len();
+                let perf_data: Vec<PlayerPerformance> = players.iter()
+                    .map(|(addr, deployed, won, rounds, wins, avg_sq, pref_sq, avg_dep, roi)| {
+                        PlayerPerformance {
+                            address: addr.clone(),
+                            total_deployed: *deployed as u64,
+                            total_won: *won as u64,
+                            total_rounds: *rounds as u32,
+                            wins: *wins as u32,
+                            avg_squares_per_deploy: *avg_sq as f64,
+                            preferred_square_count: *pref_sq as u8,
+                            avg_deploy_size: *avg_dep as u64,
+                            roi: *roi as f64,
+                            ore_per_sol: 0.0,
+                        }
+                    })
+                    .collect();
+                self.ore_strategy.load_player_stats(perf_data);
+                info!("   ✅ Loaded {} player strategies", count);
+            }
+        }
+        
+        // Load square count statistics
+        if let Ok(sq_stats) = db.load_square_count_stats().await {
+            if !sq_stats.is_empty() {
+                let sq_data: Vec<SquareCountStats> = sq_stats.iter()
+                    .map(|(count, used, won, deployed, total_won, win_rate, roi)| {
+                        SquareCountStats {
+                            count: *count as u8,
+                            times_used: *used as u32,
+                            times_won: *won as u32,
+                            total_deployed: *deployed as u64,
+                            total_won: *total_won as u64,
+                            avg_ore_earned: 0.0,
+                            win_rate: *win_rate as f64,
+                            roi: *roi as f64,
+                        }
+                    })
+                    .collect();
+                self.ore_strategy.load_square_count_stats(sq_data);
+                info!("   ✅ Loaded square count statistics");
+            }
+        }
+        
+        // Get consensus recommendation
+        if let Ok(state) = db.get_state("consensus_recommendation").await {
+            if let Some(rec) = state {
+                info!("   📊 Current consensus: {:?} (conf: {}%)", 
+                    rec["squares"],
+                    rec["confidence"].as_f64().unwrap_or(0.0) * 100.0);
+            }
+        }
+        
+        // Load detected strategies (the key learning!)
+        if let Ok(strategies) = db.load_detected_strategies().await {
+            if !strategies.is_empty() {
+                info!("   🧠 Detected strategies:");
+                for s in &strategies {
+                    info!("      • {}: {} squares, {:.4} SOL, {} competition (conf: {:.0}%)",
+                        s["name"].as_str().unwrap_or("?"),
+                        s["square_count"],
+                        s["bet_size_sol"].as_f64().unwrap_or(0.0),
+                        s["target_competition"].as_str().unwrap_or("?"),
+                        s["confidence"].as_f64().unwrap_or(0.0) * 100.0);
+                }
+                
+                // Apply the best learned strategy to our ore_strategy!
+                info!("   🎯 Applying best learned strategy...");
+                self.ore_strategy.apply_best_strategy(&strategies);
+            }
+        }
+        
+        // Load win stats to understand what works
+        if let Ok(stats) = db.get_win_stats().await {
+            info!("   📈 Win Statistics:");
+            info!("      • Total wins tracked: {}", stats["total_wins_tracked"]);
+            info!("      • Full ORE wins: {}", stats["full_ore_wins"]);
+            if let Some(avg_sq) = stats["full_ore_avg_squares"].as_f64() {
+                info!("      • Full ORE winners avg: {:.1} squares, {:.4} SOL bet",
+                    avg_sq, stats["full_ore_avg_bet_sol"].as_f64().unwrap_or(0.0));
+            }
         }
     }
 
-    async fn mining_loop(&self) -> Result<()> {
-        info!("🔨 Miner bot started");
+    #[cfg(not(feature = "database"))]
+    async fn load_learned_data(&mut self, _db: &()) {
+        info!("📚 No database available, using default strategies");
+    }
 
+    /// Get wallet balance
+    fn get_balance(&self) -> Result<u64> {
+        let client = OreClient::new(self.rpc_url.clone(), Keypair::from_bytes(&self.keypair.to_bytes()).unwrap());
+        client.get_balance()
+    }
+
+    /// Main mining loop
+    async fn mining_loop(&mut self) -> Result<()> {
+        info!("⛏️  Smart Miner started!");
+        info!("   Min wallet: {:.4} SOL", self.ore_strategy.min_wallet_sol);
+        info!("   Max bet/round: {:.4} SOL", self.ore_strategy.max_bet_per_round_sol);
+        
+        let mut last_round_id: u64 = 0;
+        let update_interval = 10; // Check every 10 seconds
+        
         loop {
             // Check status
             {
@@ -71,57 +225,135 @@ impl MinerBot {
                 }
             }
 
-            // Check balance
-            let balance = self.client.get_balance()?;
-            let balance_sol = balance as f64 / 1_000_000_000.0;
-
-            if balance_sol < self.config.min_sol_balance {
-                error!("⚠️  Insufficient balance: {:.4} SOL (minimum: {:.2} SOL)", 
-                    balance_sol, self.config.min_sol_balance);
-                sleep(Duration::from_secs(60)).await;
-                continue;
-            }
+            // Get wallet balance
+            let balance = match self.get_balance() {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("Failed to get balance: {}", e);
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
+            
+            let balance_sol = balance as f64 / LAMPORTS_PER_SOL as f64;
+            let rounds_remaining = self.ore_strategy.estimate_rounds_remaining(balance);
 
             // Get current round
-            let board = self.client.get_board()?;
-            let round = self.client.get_round(board.round_id)?;
-
-            info!("📊 Current round: {}, Total deployed: {}", 
-                board.round_id, 
-                round.deployed.iter().sum::<u64>()
-            );
-
-            // Get historical data for strategy
-            let history = self.client.get_rounds(board.round_id, 10)?
-                .into_iter()
-                .map(|(_, r)| r)
-                .collect::<Vec<_>>();
-
-            // Select squares to deploy on
-            let squares = self.strategy.select_squares(1, &round, &history)?;
+            let board = match self.parser.get_board() {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("Failed to get board: {}", e);
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
             
-            info!("🎯 Selected squares: {:?}", squares);
+            let round = match self.parser.get_round(board.round_id) {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("Failed to get round: {}", e);
+                    sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+            };
 
-            // Here you would implement the actual deployment transaction
-            // For now, we'll just log it
-            info!("⛏️  Would deploy {:.4} SOL to squares {:?}", 
-                self.config.deploy_amount_sol, squares);
+            let current_round_id = board.round_id;
+            let total_deployed: u64 = round.deployed.iter().sum();
+            let competition = CompetitionLevel::from_deployed(total_deployed);
+            let num_deployers = round.deployed.iter().filter(|&&d| d > 0).count() as u32;
 
-            // Check if we should claim rewards
-            if let Ok(Some(miner)) = self.client.get_miner() {
-                let claimable_ore = miner.rewards_ore as f64 / 1e11; // Convert from grams to ORE
-                
-                if claimable_ore >= self.config.auto_claim_threshold_ore {
-                    info!("💰 Claiming {:.2} ORE in rewards", claimable_ore);
-                    // Implement claim transaction here
+            // Display status
+            info!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            info!("💰 Balance: {:.4} SOL | Est. rounds: {}", balance_sol, rounds_remaining);
+            info!("📊 Round {} | Deployed: {:.4} SOL | Competition: {:?}", 
+                current_round_id,
+                total_deployed as f64 / LAMPORTS_PER_SOL as f64,
+                competition);
+            
+            // Get consensus recommendation from coordinator (via database)
+            let mut consensus_squares: Vec<usize> = Vec::new();
+            let mut consensus_confidence: f64 = 0.0;
+            
+            #[cfg(feature = "database")]
+            if is_database_available() {
+                if let Ok(db) = SharedDb::connect().await {
+                    if let Ok(Some(rec)) = db.get_state("consensus_recommendation").await {
+                        if let Some(squares) = rec["squares"].as_array() {
+                            consensus_squares = squares.iter()
+                                .filter_map(|s| s.as_u64().map(|n| n as usize))
+                                .collect();
+                        }
+                        consensus_confidence = rec["confidence"].as_f64().unwrap_or(0.0);
+                    }
                 }
             }
 
-            // Wait before next iteration
-            sleep(Duration::from_secs(30)).await;
+            // Make deploy decision using learned strategy
+            let decision = self.ore_strategy.make_deploy_decision(
+                balance,
+                &round.deployed,
+                num_deployers,
+                &consensus_squares,
+                consensus_confidence,
+            );
+
+            if decision.should_deploy {
+                info!("{}", format!("🎯 DEPLOY DECISION: YES").green().bold());
+                info!("   Squares: {:?} ({} total)", decision.squares, decision.squares.len());
+                info!("   Amount: {:.4} SOL ({:.6} per square)", 
+                    decision.total_amount_lamports as f64 / LAMPORTS_PER_SOL as f64,
+                    decision.per_square_lamports as f64 / LAMPORTS_PER_SOL as f64);
+                info!("   Expected ORE: {:.2}", decision.expected_ore);
+                info!("   Reasoning: {}", decision.reasoning);
+                
+                if self.mode == "live" {
+                    // TODO: Execute actual deploy transaction
+                    info!("⚡ EXECUTING DEPLOY TRANSACTION...");
+                    // self.execute_deploy(&decision).await?;
+                    warn!("   ⚠️ Transaction execution not yet implemented");
+                } else {
+                    info!("   📋 SIMULATION MODE - no transaction sent");
+                }
+                
+                self.rounds_played += 1;
+                self.total_deployed += decision.total_amount_lamports;
+                
+            } else {
+                info!("{}", format!("⏸️  SKIP THIS ROUND").yellow());
+                if let Some(reason) = decision.skip_reason {
+                    info!("   Reason: {}", reason);
+                }
+            }
+
+            // Check for new round (learning opportunity)
+            if current_round_id != last_round_id && last_round_id != 0 {
+                info!("{}", format!("🆕 New round: {} → {}", last_round_id, current_round_id).green());
+                // TODO: Check if we won the previous round and update learning
+            }
+            last_round_id = current_round_id;
+
+            // Display learning stats
+            let summary = self.ore_strategy.get_learning_summary();
+            let (optimal_count, _, reasoning) = self.ore_strategy.get_optimal_square_count();
+            info!("\n📈 Learning Stats:");
+            info!("   Players tracked: {}", summary["total_players_tracked"]);
+            info!("   Optimal squares: {} ({})", optimal_count, reasoning);
+            info!("   My stats: {} rounds, {} won, {:.4} SOL deployed", 
+                self.rounds_played, self.rounds_won, 
+                self.total_deployed as f64 / LAMPORTS_PER_SOL as f64);
+            
+            info!("\n⏳ Next check in {} seconds...\n", update_interval);
+            sleep(Duration::from_secs(update_interval)).await;
         }
 
-        info!("🛑 Miner bot stopped");
+        info!("🛑 Smart Miner stopped");
+        info!("📊 Final Stats: {} rounds, {} won ({:.1}% win rate)", 
+            self.rounds_played, 
+            self.rounds_won,
+            if self.rounds_played > 0 { 
+                self.rounds_won as f64 / self.rounds_played as f64 * 100.0 
+            } else { 0.0 });
+        
         Ok(())
     }
 
@@ -134,15 +366,42 @@ impl MinerBot {
 
 #[tokio::main]
 async fn main() {
-    // Initialize logger with RUST_LOG env var support
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("info")
     ).init();
 
-    info!("⛏️ ORE Miner Bot Starting...");
+    println!("{}", r#"
+    ╔═══════════════════════════════════════════════════════════════════════╗
+    ║                                                                       ║
+    ║   ███████╗███╗   ███╗ █████╗ ██████╗ ████████╗                        ║
+    ║   ██╔════╝████╗ ████║██╔══██╗██╔══██╗╚══██╔══╝                        ║
+    ║   ███████╗██╔████╔██║███████║██████╔╝   ██║                           ║
+    ║   ╚════██║██║╚██╔╝██║██╔══██║██╔══██╗   ██║                           ║
+    ║   ███████║██║ ╚═╝ ██║██║  ██║██║  ██║   ██║                           ║
+    ║   ╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝                           ║
+    ║                                                                       ║
+    ║   ███╗   ███╗██╗███╗   ██╗███████╗██████╗                             ║
+    ║   ████╗ ████║██║████╗  ██║██╔════╝██╔══██╗                            ║
+    ║   ██╔████╔██║██║██╔██╗ ██║█████╗  ██████╔╝                            ║
+    ║   ██║╚██╔╝██║██║██║╚██╗██║██╔══╝  ██╔══██╗                            ║
+    ║   ██║ ╚═╝ ██║██║██║ ╚████║███████╗██║  ██║                            ║
+    ║   ╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝                            ║
+    ║                                                                       ║
+    ║          Learns from ALL players • Optimizes for ORE splits           ║
+    ╚═══════════════════════════════════════════════════════════════════════╝
+    "#.bright_cyan());
+
+    info!("⛏️ Smart ORE Miner Starting...");
+    info!("═══════════════════════════════════════════════════════════════");
+    info!("📋 ORE Game Rules:");
+    info!("   • 5x5 grid (25 squares)");
+    info!("   • Can bet on 1-25 squares per round");
+    info!("   • Min wallet balance: {:.4} SOL", MIN_WALLET_SOL);
+    info!("   • Max bet per round: {:.4} SOL (divided across squares)", MAX_BET_PER_ROUND_SOL);
+    info!("   • Low competition = better ORE splits!");
     info!("═══════════════════════════════════════════════════════════════");
 
-    // Load configuration from env or file
+    // Load configuration
     let config = if std::env::var("RPC_URL").is_ok() {
         info!("📋 Loading config from environment variables");
         BotConfig::from_env()
@@ -151,22 +410,9 @@ async fn main() {
             .nth(1)
             .unwrap_or_else(|| "config.json".to_string());
         
-        info!("📋 Loading config from: {}", config_path);
-        
         match std::fs::read_to_string(&config_path) {
-            Ok(data) => {
-                match serde_json::from_str(&data) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        error!("Failed to parse config: {}", e);
-                        return;
-                    }
-                }
-            }
-            Err(_) => {
-                info!("📋 No config file found, using defaults with env vars");
-                BotConfig::from_env()
-            }
+            Ok(data) => serde_json::from_str(&data).unwrap_or_else(|_| BotConfig::from_env()),
+            Err(_) => BotConfig::from_env(),
         }
     };
 
@@ -186,22 +432,43 @@ async fn main() {
 
     info!("📡 RPC: {}", config.rpc_url);
     info!("🔑 Wallet: {}", keypair.pubkey());
-    info!("⛏️ Strategy: {}", config.mining.strategy);
-    info!("💰 Deploy Amount: {:.4} SOL", config.mining.deploy_amount_sol);
     info!("═══════════════════════════════════════════════════════════════");
 
-    // Check mode
-    if config.mode != "live" {
-        warn!("⚠️ Bot mode is '{}' - transactions will NOT be sent!", config.mode);
+    // Get mode
+    let mode = config.mode.clone();
+    if mode != "live" {
+        warn!("{}", "⚠️ SIMULATION MODE - transactions will NOT be sent!".yellow());
         warn!("   Set BOT_MODE=live to enable real transactions");
+    } else {
+        info!("{}", "🟢 LIVE MODE - real transactions enabled!".green().bold());
     }
 
-    // Create client
-    let client = OreClient::new(config.rpc_url.clone(), keypair);
+    // Create bot
+    let mut bot = match SmartMinerBot::new(config.rpc_url.clone(), keypair, mode).await {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Failed to create bot: {}", e);
+            return;
+        }
+    };
 
-    // Create and run miner bot
-    let mut miner_bot = MinerBot::new(config.mining.clone(), Arc::new(client));
-    if let Err(e) = miner_bot.start().await {
+    // Load learned data from database
+    #[cfg(feature = "database")]
+    if is_database_available() {
+        if let Ok(db) = SharedDb::connect().await {
+            bot.load_learned_data(&db).await;
+        }
+    }
+
+    // Set up Ctrl+C handler
+    let status = bot.status.clone();
+    ctrlc::set_handler(move || {
+        println!("\n🛑 Stopping miner...");
+        *status.write().unwrap() = BotStatus::Stopped;
+    }).ok();
+
+    // Run the bot
+    if let Err(e) = bot.start().await {
         error!("Miner bot error: {}", e);
     }
 }

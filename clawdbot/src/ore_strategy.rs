@@ -1,0 +1,613 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// ORE Mining Strategy Engine
+/// Learns optimal play from ALL on-chain players (not just whales)
+/// Key objectives:
+/// 1. Find optimal number of squares (1-25) for ROI
+/// 2. Target low-competition rounds for better ORE splits
+/// 3. Maximize rounds played with limited SOL
+/// 4. Extract maximum ORE rewards
+
+pub const BOARD_SIZE: usize = 25;
+pub const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
+
+/// Player performance data learned from on-chain activity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerPerformance {
+    pub address: String,
+    pub total_deployed: u64,
+    pub total_won: u64,
+    pub total_rounds: u32,
+    pub wins: u32,
+    pub avg_squares_per_deploy: f64,
+    pub preferred_square_count: u8,
+    pub avg_deploy_size: u64,
+    pub roi: f64,  // Return on investment
+    pub ore_per_sol: f64,  // ORE earned per SOL spent
+}
+
+/// Round conditions analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoundConditions {
+    pub round_id: u64,
+    pub total_deployed: u64,
+    pub num_deployers: u32,
+    pub avg_deploy_size: u64,
+    pub competition_level: CompetitionLevel,
+    pub expected_ore_multiplier: f64,
+    pub squares_with_deploys: u8,
+    pub empty_squares: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum CompetitionLevel {
+    VeryLow,   // < 0.5 SOL total - best for ORE
+    Low,       // 0.5 - 2 SOL
+    Medium,    // 2 - 10 SOL
+    High,      // 10 - 50 SOL
+    VeryHigh,  // > 50 SOL - worst for ORE splits
+}
+
+impl CompetitionLevel {
+    pub fn from_deployed(lamports: u64) -> Self {
+        let sol = lamports as f64 / LAMPORTS_PER_SOL as f64;
+        if sol < 0.5 {
+            Self::VeryLow
+        } else if sol < 2.0 {
+            Self::Low
+        } else if sol < 10.0 {
+            Self::Medium
+        } else if sol < 50.0 {
+            Self::High
+        } else {
+            Self::VeryHigh
+        }
+    }
+
+    /// Expected ORE multiplier based on competition
+    /// Lower competition = higher ORE per winner
+    pub fn ore_multiplier(&self) -> f64 {
+        match self {
+            Self::VeryLow => 2.0,   // Can get +2 or higher ORE
+            Self::Low => 1.5,       // +1.5 ORE typical
+            Self::Medium => 1.0,    // +1 ORE typical
+            Self::High => 0.5,      // Split rewards
+            Self::VeryHigh => 0.25, // Heavy splits
+        }
+    }
+}
+
+/// Learned optimal configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OptimalConfig {
+    pub squares_to_play: u8,
+    pub deploy_per_square_lamports: u64,
+    pub total_deploy_lamports: u64,
+    pub target_competition: CompetitionLevel,
+    pub confidence: f64,
+    pub reasoning: String,
+}
+
+/// Deployment decision
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployDecision {
+    pub should_deploy: bool,
+    pub squares: Vec<usize>,
+    pub total_amount_lamports: u64,
+    pub per_square_lamports: u64,
+    pub expected_ore: f64,
+    pub reasoning: String,
+    pub skip_reason: Option<String>,
+}
+
+/// Main ORE Strategy Engine
+pub struct OreStrategyEngine {
+    // Learned from all players
+    player_stats: HashMap<String, PlayerPerformance>,
+    
+    // Learned optimal square counts
+    square_count_performance: [SquareCountStats; 26], // Index 0 unused, 1-25 valid
+    
+    // Round history for pattern detection
+    round_history: Vec<RoundConditions>,
+    
+    // Configuration limits
+    pub min_wallet_sol: f64,
+    pub max_bet_per_round_sol: f64,
+    pub target_rounds_per_session: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SquareCountStats {
+    pub count: u8,
+    pub times_used: u32,
+    pub times_won: u32,
+    pub total_deployed: u64,
+    pub total_won: u64,
+    pub avg_ore_earned: f64,
+    pub win_rate: f64,
+    pub roi: f64,
+}
+
+impl OreStrategyEngine {
+    pub fn new() -> Self {
+        let mut square_count_performance: [SquareCountStats; 26] = Default::default();
+        for i in 0..26 {
+            square_count_performance[i].count = i as u8;
+        }
+        
+        Self {
+            player_stats: HashMap::new(),
+            square_count_performance,
+            round_history: Vec::new(),
+            min_wallet_sol: 0.05,        // Keep at least 0.05 SOL
+            max_bet_per_round_sol: 0.04, // Max 0.04 SOL per round total
+            target_rounds_per_session: 100, // Try to play 100 rounds
+        }
+    }
+
+    /// Load learned data from database
+    pub fn load_player_stats(&mut self, stats: Vec<PlayerPerformance>) {
+        for stat in stats {
+            self.player_stats.insert(stat.address.clone(), stat);
+        }
+    }
+
+    /// Load square count performance from database
+    pub fn load_square_count_stats(&mut self, stats: Vec<SquareCountStats>) {
+        for stat in stats {
+            if stat.count > 0 && stat.count <= 25 {
+                self.square_count_performance[stat.count as usize] = stat;
+            }
+        }
+    }
+
+    /// Record a player's deploy for learning
+    pub fn record_deploy(
+        &mut self,
+        address: &str,
+        amount_lamports: u64,
+        square_count: u8,
+    ) {
+        let player = self.player_stats.entry(address.to_string()).or_insert_with(|| {
+            PlayerPerformance {
+                address: address.to_string(),
+                total_deployed: 0,
+                total_won: 0,
+                total_rounds: 0,
+                wins: 0,
+                avg_squares_per_deploy: 0.0,
+                preferred_square_count: 0,
+                avg_deploy_size: 0,
+                roi: 0.0,
+                ore_per_sol: 0.0,
+            }
+        });
+
+        player.total_deployed += amount_lamports;
+        player.total_rounds += 1;
+        
+        // Update rolling average of squares used
+        let n = player.total_rounds as f64;
+        player.avg_squares_per_deploy = 
+            ((player.avg_squares_per_deploy * (n - 1.0)) + square_count as f64) / n;
+        
+        player.avg_deploy_size = player.total_deployed / player.total_rounds as u64;
+
+        // Update square count stats
+        if square_count > 0 && square_count <= 25 {
+            self.square_count_performance[square_count as usize].times_used += 1;
+            self.square_count_performance[square_count as usize].total_deployed += amount_lamports;
+        }
+    }
+
+    /// Record a win for learning
+    pub fn record_win(
+        &mut self,
+        address: &str,
+        amount_won_lamports: u64,
+        ore_earned: f64,
+        square_count: u8,
+    ) {
+        if let Some(player) = self.player_stats.get_mut(address) {
+            player.total_won += amount_won_lamports;
+            player.wins += 1;
+            player.roi = if player.total_deployed > 0 {
+                (player.total_won as f64 - player.total_deployed as f64) / player.total_deployed as f64
+            } else {
+                0.0
+            };
+            
+            // Calculate ORE per SOL
+            let total_sol = player.total_deployed as f64 / LAMPORTS_PER_SOL as f64;
+            if total_sol > 0.0 {
+                // This would need actual ORE tracking, simplified here
+                player.ore_per_sol = ore_earned / total_sol;
+            }
+        }
+
+        // Update square count stats
+        if square_count > 0 && square_count <= 25 {
+            let stats = &mut self.square_count_performance[square_count as usize];
+            stats.times_won += 1;
+            stats.total_won += amount_won_lamports;
+            stats.win_rate = stats.times_won as f64 / stats.times_used.max(1) as f64;
+            stats.roi = if stats.total_deployed > 0 {
+                (stats.total_won as f64 - stats.total_deployed as f64) / stats.total_deployed as f64
+            } else {
+                0.0
+            };
+        }
+    }
+
+    /// Analyze current round conditions
+    pub fn analyze_round(&self, deployed: &[u64; 25], num_deployers: u32) -> RoundConditions {
+        let total_deployed: u64 = deployed.iter().sum();
+        let squares_with_deploys = deployed.iter().filter(|&&d| d > 0).count() as u8;
+        let empty_squares: Vec<usize> = deployed.iter()
+            .enumerate()
+            .filter(|(_, &d)| d == 0)
+            .map(|(i, _)| i)
+            .collect();
+
+        let avg_deploy_size = if num_deployers > 0 {
+            total_deployed / num_deployers as u64
+        } else {
+            0
+        };
+
+        let competition = CompetitionLevel::from_deployed(total_deployed);
+
+        RoundConditions {
+            round_id: 0, // Set externally
+            total_deployed,
+            num_deployers,
+            avg_deploy_size,
+            competition_level: competition,
+            expected_ore_multiplier: competition.ore_multiplier(),
+            squares_with_deploys,
+            empty_squares,
+        }
+    }
+
+    /// Find optimal number of squares based on learned data
+    pub fn get_optimal_square_count(&self) -> (u8, f64, String) {
+        let mut best_count = 5u8; // Default
+        let mut best_score = 0.0f64;
+        let mut reasoning = String::new();
+
+        // Score each square count by: win_rate * ore_efficiency - cost
+        for count in 1..=25u8 {
+            let stats = &self.square_count_performance[count as usize];
+            if stats.times_used < 10 {
+                continue; // Not enough data
+            }
+
+            // Win probability increases with more squares
+            let base_win_prob = count as f64 / 25.0;
+            
+            // But cost increases linearly
+            let cost_factor = count as f64;
+            
+            // ORE efficiency (more squares = smaller share when winning)
+            let ore_efficiency = 1.0 / (count as f64).sqrt();
+            
+            // Actual win rate from data
+            let actual_win_rate = stats.win_rate;
+            
+            // Combined score: actual performance weighted by efficiency
+            let score = (actual_win_rate * 2.0 + base_win_prob) * ore_efficiency / cost_factor;
+
+            if score > best_score {
+                best_score = score;
+                best_count = count;
+                reasoning = format!(
+                    "{} squares: {:.1}% win rate, {:.2} efficiency, {} samples",
+                    count, actual_win_rate * 100.0, ore_efficiency, stats.times_used
+                );
+            }
+        }
+
+        // If no data, use mathematical optimal
+        if best_score == 0.0 {
+            // Sweet spot is usually 3-7 squares for balance of win chance vs cost
+            best_count = 5;
+            reasoning = "No learned data yet, using default of 5 squares".to_string();
+        }
+
+        (best_count, best_score, reasoning)
+    }
+
+    /// Get top performing players to learn from
+    pub fn get_top_performers(&self, limit: usize) -> Vec<&PlayerPerformance> {
+        let mut players: Vec<_> = self.player_stats.values()
+            .filter(|p| p.total_rounds >= 10) // Minimum activity
+            .collect();
+        
+        // Sort by ROI * win_rate (combined performance)
+        players.sort_by(|a, b| {
+            let score_a = a.roi * (a.wins as f64 / a.total_rounds.max(1) as f64);
+            let score_b = b.roi * (b.wins as f64 / b.total_rounds.max(1) as f64);
+            score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        players.into_iter().take(limit).collect()
+    }
+
+    /// Main decision: should we deploy this round?
+    pub fn make_deploy_decision(
+        &self,
+        wallet_balance_lamports: u64,
+        current_round_deployed: &[u64; 25],
+        num_deployers: u32,
+        consensus_squares: &[usize],
+        consensus_confidence: f64,
+    ) -> DeployDecision {
+        let wallet_sol = wallet_balance_lamports as f64 / LAMPORTS_PER_SOL as f64;
+        let conditions = self.analyze_round(current_round_deployed, num_deployers);
+
+        // Check if we have enough balance
+        if wallet_sol < self.min_wallet_sol {
+            return DeployDecision {
+                should_deploy: false,
+                squares: vec![],
+                total_amount_lamports: 0,
+                per_square_lamports: 0,
+                expected_ore: 0.0,
+                reasoning: String::new(),
+                skip_reason: Some(format!(
+                    "Wallet balance {:.4} SOL below minimum {:.4} SOL",
+                    wallet_sol, self.min_wallet_sol
+                )),
+            };
+        }
+
+        // Calculate available budget (leave min_wallet_sol)
+        let available_sol = wallet_sol - self.min_wallet_sol;
+        let max_this_round = available_sol.min(self.max_bet_per_round_sol);
+
+        // Decide based on competition level
+        let (should_play, ore_multiplier, skip_reason) = match conditions.competition_level {
+            CompetitionLevel::VeryLow => (true, 2.0, None),
+            CompetitionLevel::Low => (true, 1.5, None),
+            CompetitionLevel::Medium => (true, 1.0, None),
+            CompetitionLevel::High => {
+                // Only play if high confidence
+                if consensus_confidence > 0.6 {
+                    (true, 0.5, None)
+                } else {
+                    (false, 0.0, Some("High competition, low confidence - skipping".to_string()))
+                }
+            }
+            CompetitionLevel::VeryHigh => {
+                (false, 0.0, Some("Very high competition - skip for better ORE splits".to_string()))
+            }
+        };
+
+        if !should_play {
+            return DeployDecision {
+                should_deploy: false,
+                squares: vec![],
+                total_amount_lamports: 0,
+                per_square_lamports: 0,
+                expected_ore: 0.0,
+                reasoning: String::new(),
+                skip_reason,
+            };
+        }
+
+        // Get optimal square count
+        let (optimal_count, _, square_reasoning) = self.get_optimal_square_count();
+        
+        // Use consensus squares if available, otherwise pick based on empty squares
+        let squares = if !consensus_squares.is_empty() && consensus_confidence > 0.4 {
+            consensus_squares.iter()
+                .take(optimal_count as usize)
+                .copied()
+                .collect()
+        } else if !conditions.empty_squares.is_empty() {
+            // Prefer empty squares (less competition)
+            conditions.empty_squares.iter()
+                .take(optimal_count as usize)
+                .copied()
+                .collect()
+        } else {
+            // Random fallback
+            (0..optimal_count as usize).collect()
+        };
+
+        let num_squares = squares.len();
+        
+        // Total amount is max_this_round, divided across squares
+        let total_amount_lamports = (max_this_round * LAMPORTS_PER_SOL as f64) as u64;
+        let per_square_lamports = total_amount_lamports / num_squares as u64;
+
+        // Expected ORE calculation
+        let win_probability = num_squares as f64 / 25.0;
+        let expected_ore = win_probability * ore_multiplier;
+
+        DeployDecision {
+            should_deploy: true,
+            squares,
+            total_amount_lamports,
+            per_square_lamports,
+            expected_ore,
+            reasoning: format!(
+                "Competition: {:?} ({}x ORE), {} squares ({}), {:.4} SOL total",
+                conditions.competition_level,
+                ore_multiplier,
+                num_squares,
+                square_reasoning,
+                total_amount_lamports as f64 / LAMPORTS_PER_SOL as f64
+            ),
+            skip_reason: None,
+        }
+    }
+
+    /// Calculate how many rounds we can play with current balance
+    pub fn estimate_rounds_remaining(&self, wallet_balance_lamports: u64) -> u32 {
+        let wallet_sol = wallet_balance_lamports as f64 / LAMPORTS_PER_SOL as f64;
+        let playable_sol = (wallet_sol - self.min_wallet_sol).max(0.0);
+        
+        if self.max_bet_per_round_sol > 0.0 {
+            (playable_sol / self.max_bet_per_round_sol) as u32
+        } else {
+            0
+        }
+    }
+
+    /// Get summary of what we've learned
+    pub fn get_learning_summary(&self) -> serde_json::Value {
+        let (optimal_squares, _, reasoning) = self.get_optimal_square_count();
+        let top_performers = self.get_top_performers(5);
+        
+        let top_players: Vec<serde_json::Value> = top_performers.iter()
+            .map(|p| serde_json::json!({
+                "address": &p.address[..8],
+                "rounds": p.total_rounds,
+                "win_rate": format!("{:.1}%", (p.wins as f64 / p.total_rounds.max(1) as f64) * 100.0),
+                "avg_squares": format!("{:.1}", p.avg_squares_per_deploy),
+                "roi": format!("{:.1}%", p.roi * 100.0),
+            }))
+            .collect();
+
+        // Best square counts by win rate
+        let mut square_counts: Vec<_> = self.square_count_performance.iter()
+            .filter(|s| s.times_used >= 5)
+            .collect();
+        square_counts.sort_by(|a, b| b.win_rate.partial_cmp(&a.win_rate).unwrap_or(std::cmp::Ordering::Equal));
+
+        let best_counts: Vec<serde_json::Value> = square_counts.iter().take(5)
+            .map(|s| serde_json::json!({
+                "squares": s.count,
+                "win_rate": format!("{:.1}%", s.win_rate * 100.0),
+                "roi": format!("{:.1}%", s.roi * 100.0),
+                "samples": s.times_used,
+            }))
+            .collect();
+
+        serde_json::json!({
+            "total_players_tracked": self.player_stats.len(),
+            "optimal_square_count": optimal_squares,
+            "optimal_reasoning": reasoning,
+            "top_performers": top_players,
+            "best_square_counts": best_counts,
+            "config": {
+                "min_wallet_sol": self.min_wallet_sol,
+                "max_bet_per_round_sol": self.max_bet_per_round_sol,
+            }
+        })
+    }
+    
+    /// Apply a detected strategy from the learning engine
+    /// This allows copying strategies that work for successful players
+    pub fn apply_detected_strategy(&mut self, strategy: &serde_json::Value) {
+        // Extract and apply strategy parameters
+        if let Some(square_count) = strategy["square_count"].as_u64() {
+            // Update the square count stats to reflect this as optimal
+            let count = (square_count as u8).min(25).max(1);
+            let stats = &mut self.square_count_performance[count as usize];
+            // Boost the confidence in this square count
+            stats.times_used += 100; // Add significant weight
+            stats.win_rate = strategy["confidence"].as_f64().unwrap_or(0.5);
+            tracing::info!("📊 Applied detected strategy: {} squares", count);
+        }
+        
+        if let Some(bet_size) = strategy["bet_size_sol"].as_f64() {
+            // Adjust max bet per round based on detected successful patterns
+            if bet_size > 0.001 && bet_size <= 0.1 {
+                self.max_bet_per_round_sol = bet_size.min(0.04); // Still cap at our limit
+                tracing::info!("💰 Adjusted bet size to {:.4} SOL", self.max_bet_per_round_sol);
+            }
+        }
+        
+        if let Some(target) = strategy["target_competition"].as_str() {
+            // Log the target competition level for decision making
+            tracing::info!("🎯 Target competition: {}", target);
+        }
+        
+        tracing::info!("🧠 Strategy applied: {} (confidence: {:.0}%)",
+            strategy["name"].as_str().unwrap_or("Unknown"),
+            strategy["confidence"].as_f64().unwrap_or(0.0) * 100.0);
+    }
+    
+    /// Apply the best detected strategy from a list
+    pub fn apply_best_strategy(&mut self, strategies: &[serde_json::Value]) {
+        // Find the strategy with highest confidence
+        let best = strategies.iter()
+            .max_by(|a, b| {
+                let conf_a = a["confidence"].as_f64().unwrap_or(0.0);
+                let conf_b = b["confidence"].as_f64().unwrap_or(0.0);
+                conf_a.partial_cmp(&conf_b).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        
+        if let Some(strategy) = best {
+            if strategy["confidence"].as_f64().unwrap_or(0.0) > 0.5 {
+                self.apply_detected_strategy(strategy);
+            } else {
+                tracing::info!("🔍 Best strategy confidence too low ({:.0}%), using defaults",
+                    strategy["confidence"].as_f64().unwrap_or(0.0) * 100.0);
+            }
+        }
+    }
+}
+
+impl Default for OreStrategyEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_competition_levels() {
+        assert_eq!(CompetitionLevel::from_deployed(100_000_000), CompetitionLevel::VeryLow);
+        assert_eq!(CompetitionLevel::from_deployed(1_000_000_000), CompetitionLevel::Low);
+        assert_eq!(CompetitionLevel::from_deployed(5_000_000_000), CompetitionLevel::Medium);
+        assert_eq!(CompetitionLevel::from_deployed(20_000_000_000), CompetitionLevel::High);
+        assert_eq!(CompetitionLevel::from_deployed(100_000_000_000), CompetitionLevel::VeryHigh);
+    }
+
+    #[test]
+    fn test_deploy_decision() {
+        let engine = OreStrategyEngine::new();
+        let deployed = [0u64; 25]; // Empty round
+        
+        let decision = engine.make_deploy_decision(
+            100_000_000, // 0.1 SOL
+            &deployed,
+            0,
+            &[5, 10, 15],
+            0.7,
+        );
+
+        assert!(decision.should_deploy);
+        assert!(!decision.squares.is_empty());
+        assert!(decision.total_amount_lamports > 0);
+    }
+
+    #[test]
+    fn test_skip_high_competition() {
+        let engine = OreStrategyEngine::new();
+        let mut deployed = [0u64; 25];
+        // Make it very high competition (100 SOL)
+        for d in &mut deployed {
+            *d = 4_000_000_000; // 4 SOL each = 100 SOL total
+        }
+        
+        let decision = engine.make_deploy_decision(
+            100_000_000,
+            &deployed,
+            50,
+            &[5],
+            0.3, // Low confidence
+        );
+
+        assert!(!decision.should_deploy);
+        assert!(decision.skip_reason.is_some());
+    }
+}

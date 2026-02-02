@@ -10,6 +10,8 @@ pub mod utils;
 pub mod ore_round;
 pub mod blockchain_parser;
 pub mod db;
+pub mod ore_strategy;
+pub mod learning_engine;
 
 pub use bot::*;
 pub use client::*;
@@ -20,3 +22,5 @@ pub use strategies::*;
 pub use analytics::*;
 pub use monitor::*;
 pub use blockchain_parser::*;
+pub use ore_strategy::*;
+pub use learning_engine::*;

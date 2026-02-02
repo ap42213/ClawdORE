@@ -3,14 +3,19 @@ use clawdbot::{
     config::BotConfig,
     db::{is_database_available, Signal, SignalType},
     strategies::{StrategyEngine, RoundHistory, StrategyRecommendation},
+    ore_strategy::{OreStrategyEngine, CompetitionLevel},
+    learning_engine::{LearningEngine, WinRecord},
 };
 use colored::*;
 use log::{error, info, warn};
 use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
 use tokio::time::{sleep, Duration};
+use std::collections::HashMap;
 
 #[cfg(feature = "database")]
 use clawdbot::db::{SharedDb, DbRound, DbTransaction};
+
+const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
 /// Load keypair from file path or from environment variable
 fn load_keypair(keypair_path: &str) -> Result<Keypair, String> {
@@ -146,6 +151,15 @@ async fn main() {
     info!("   • Pattern Detection, Kelly Criterion, Quadrant Analysis");
     info!("   • Mean Reversion, Consensus (weighted combination)");
 
+    // Initialize ORE-specific strategy engine for ALL player learning
+    let mut ore_strategy = OreStrategyEngine::new();
+    info!("\n🎯 ORE Strategy Engine initialized:");
+    info!("   • Tracking ALL players (not just whales)");
+    info!("   • Learning optimal square counts (1-25)");
+    info!("   • Analyzing competition levels for ORE splits");
+    info!("   • Min wallet: {:.4} SOL, Max bet: {:.4} SOL", 
+        ore_strategy.min_wallet_sol, ore_strategy.max_bet_per_round_sol);
+
     // Load persisted learning data from database
     #[cfg(feature = "database")]
     if let Some(ref db) = db {
@@ -197,8 +211,94 @@ async fn main() {
             info!("   • Transactions processed: {}", summary["transactions_analyzed"]);
         }
         
+        // Load ALL player performance data for ore_strategy
+        if let Ok(players) = db.load_all_players().await {
+            if !players.is_empty() {
+                info!("\n👥 Loaded {} tracked players for learning", players.len());
+                for (addr, deployed, won, rounds, wins, avg_sq, _, _, roi) in players.iter().take(5) {
+                    info!("   • {}: {} rounds, {:.1}% win rate, {:.1}% ROI, avg {:.1} squares",
+                        &addr[..8], rounds,
+                        (*wins as f64 / *rounds.max(&1) as f64) * 100.0,
+                        roi * 100.0,
+                        avg_sq);
+                }
+                // Load into ore_strategy engine
+                let perf_data: Vec<clawdbot::ore_strategy::PlayerPerformance> = players.iter()
+                    .map(|(addr, deployed, won, rounds, wins, avg_sq, pref_sq, avg_dep, roi)| {
+                        clawdbot::ore_strategy::PlayerPerformance {
+                            address: addr.clone(),
+                            total_deployed: *deployed as u64,
+                            total_won: *won as u64,
+                            total_rounds: *rounds as u32,
+                            wins: *wins as u32,
+                            avg_squares_per_deploy: *avg_sq as f64,
+                            preferred_square_count: *pref_sq as u8,
+                            avg_deploy_size: *avg_dep as u64,
+                            roi: *roi as f64,
+                            ore_per_sol: 0.0,
+                        }
+                    })
+                    .collect();
+                ore_strategy.load_player_stats(perf_data);
+            }
+        }
+        
+        // Load square count statistics
+        if let Ok(sq_stats) = db.load_square_count_stats().await {
+            if !sq_stats.is_empty() {
+                info!("\n🎲 Square count performance:");
+                for (count, used, won, _, _, win_rate, roi) in sq_stats.iter().take(5) {
+                    info!("   • {} squares: {:.1}% win rate, {:.1}% ROI ({} samples)",
+                        count, win_rate * 100.0, roi * 100.0, used);
+                }
+                // Load into ore_strategy engine
+                let sq_data: Vec<clawdbot::ore_strategy::SquareCountStats> = sq_stats.iter()
+                    .map(|(count, used, won, deployed, total_won, win_rate, roi)| {
+                        clawdbot::ore_strategy::SquareCountStats {
+                            count: *count as u8,
+                            times_used: *used as u32,
+                            times_won: *won as u32,
+                            total_deployed: *deployed as u64,
+                            total_won: *total_won as u64,
+                            avg_ore_earned: 0.0,
+                            win_rate: *win_rate as f64,
+                            roi: *roi as f64,
+                        }
+                    })
+                    .collect();
+                ore_strategy.load_square_count_stats(sq_data);
+            }
+        }
+        
+        // Get best conditions from history
+        if let Ok(conditions) = db.get_best_conditions().await {
+            if !conditions.is_empty() {
+                info!("\n🎯 Best conditions for ORE earnings:");
+                for (level, count, win_rate, avg_ore) in &conditions {
+                    info!("   • {}: {:.1}% win rate, {:.2} avg ORE ({} rounds)",
+                        level, win_rate * 100.0, avg_ore, count);
+                }
+            }
+        }
+        
+        // Get comprehensive summary
+        if let Ok(summary) = db.get_comprehensive_learning_summary().await {
+            info!("\n📊 All-Player Learning Summary:");
+            info!("   • Total players tracked: {}", summary["total_players_tracked"]);
+            info!("   • Active players (10+ rounds): {}", summary["active_players"]);
+            info!("   • Best square count: {}", summary["best_square_count"]);
+            info!("   • Avg winner squares: {:.1}", summary["avg_winner_square_count"]);
+        }
+        
         info!("");
     }
+
+    // Initialize learning engine for deep analysis
+    let mut learning_engine = LearningEngine::new();
+    info!("🧠 Learning Engine initialized for deep pattern analysis");
+
+    // Track deploys per round for win detection
+    let mut round_deploys: HashMap<String, (u64, Vec<u8>)> = HashMap::new();
 
     // Set up Ctrl+C handler
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -222,6 +322,9 @@ async fn main() {
                 // Detect new round
                 if current_round != last_round_id && last_round_id != 0 {
                     info!("{}", format!("🆕 NEW ROUND DETECTED: {} → {}", last_round_id, current_round).green().bold());
+                    
+                    // Clear round deploys for new round
+                    round_deploys.clear();
                     
                     // Try to get the completed round data and add to strategy engine
                     if let Ok(completed) = parser.get_round(last_round_id) {
@@ -412,17 +515,62 @@ async fn main() {
                     }
                 }
                 
-                // Track whales (deployers with > 1 SOL) - persist to database
+                // TRACK ALL PLAYERS (not just whales!) - this is key for learning
+                let mut deploy_count = 0;
                 for tx in &transactions {
                     if let Some(ref deploy) = tx.deploy_data {
+                        let square_count = deploy.squares.len() as u8;
+                        let squares_u8: Vec<u8> = deploy.squares.iter().map(|&s| s as u8).collect();
+                        
+                        // Track in ore_strategy engine (in-memory)
+                        ore_strategy.record_deploy(
+                            &tx.signer,
+                            deploy.amount_lamports,
+                            square_count,
+                        );
+                        
+                        // Track in learning engine with more context
+                        learning_engine.record_deploy(
+                            &tx.signer,
+                            deploy.amount_lamports,
+                            &squares_u8,
+                            0, // Will get total from round data
+                            false, // Will detect motherlode from reset
+                            tx.slot,
+                        );
+                        
+                        // Track for win detection
+                        round_deploys.insert(
+                            tx.signer.clone(),
+                            (deploy.amount_lamports, squares_u8.clone())
+                        );
+                        
+                        deploy_count += 1;
+                        
+                        // Persist ALL player deploys to database
+                        #[cfg(feature = "database")]
+                        if let Some(ref db) = db {
+                            db.record_player_deploy(
+                                &tx.signer,
+                                deploy.amount_lamports as i64,
+                                square_count as i16,
+                                tx.slot as i64,
+                            ).await.ok();
+                            
+                            // Also track square count stats
+                            db.record_square_count_deploy(
+                                square_count as i16,
+                                deploy.amount_lamports as i64,
+                            ).await.ok();
+                        }
+                        
+                        // Still track whales separately for whale-following strategy
                         if deploy.amount_lamports > 1_000_000_000 { // > 1 SOL = whale
-                            // Track in memory
                             strategy_engine.track_whale(
                                 tx.signer.clone(),
                                 deploy.squares.iter().map(|&s| s as usize).collect()
                             );
                             
-                            // Persist to database
                             #[cfg(feature = "database")]
                             if let Some(ref db) = db {
                                 let squares: Vec<i32> = deploy.squares.iter().map(|&s| s as i32).collect();
@@ -433,7 +581,7 @@ async fn main() {
                                 ).await.ok();
                             }
                             
-                            info!("🐋 Whale detected: {} deployed {:.2} SOL to squares {:?}",
+                            info!("🐋 Whale: {} → {:.2} SOL on {:?}",
                                 &tx.signer[..8],
                                 deploy.amount_lamports as f64 / 1_000_000_000.0,
                                 deploy.squares);
@@ -463,7 +611,109 @@ async fn main() {
                             if let Ok(round) = parser.get_round(reset.round_id) {
                                 let deployed: [i64; 25] = round.deployed.map(|d| d as i64);
                                 db.update_square_stats(reset.winning_square as i16, &deployed).await.ok();
-                                info!("📚 Updated square statistics from round {}", reset.round_id);
+                                
+                                // Record round conditions for competition analysis
+                                let total_deployed: i64 = deployed.iter().sum();
+                                let num_deployers = deployed.iter().filter(|&&d| d > 0).count() as i32;
+                                let squares_with_deploys = num_deployers as i16;
+                                let competition = CompetitionLevel::from_deployed(total_deployed as u64);
+                                let winning_sq = reset.winning_square as usize;
+                                let competition_on_square = if winning_sq < 25 { deployed[winning_sq] } else { 0 };
+                                
+                                // Determine if this could be a full ORE win
+                                let is_full_ore = (total_deployed as f64 / LAMPORTS_PER_SOL as f64) < 2.0;
+                                let ore_earned = if is_full_ore { 1.0 } else {
+                                    1.0 / (num_deployers.max(1) as f64 / 2.0)
+                                };
+                                
+                                db.record_round_conditions(
+                                    reset.round_id as i64,
+                                    total_deployed,
+                                    num_deployers,
+                                    &format!("{:?}", competition),
+                                    competition.ore_multiplier() as f32,
+                                    squares_with_deploys,
+                                ).await.ok();
+                                
+                                info!("📊 Round {} Analysis:", reset.round_id);
+                                info!("   • Total deployed: {:.4} SOL ({:?})", 
+                                    total_deployed as f64 / LAMPORTS_PER_SOL as f64, competition);
+                                info!("   • Competition on square {}: {:.4} SOL", 
+                                    reset.winning_square, competition_on_square as f64 / LAMPORTS_PER_SOL as f64);
+                                info!("   • Full ORE: {} | Est. ORE: {:.2}", 
+                                    if is_full_ore { "YES ✅" } else { "No" }, ore_earned);
+                                
+                                // FIND AND RECORD ALL WINNERS
+                                let mut winners_found = 0;
+                                for (address, (amount, squares)) in &round_deploys {
+                                    if squares.contains(&(reset.winning_square as u8)) {
+                                        let num_squares = squares.len() as u8;
+                                        let winner_share = if competition_on_square > 0 {
+                                            *amount as f64 / competition_on_square as f64
+                                        } else {
+                                            1.0
+                                        };
+                                        let amount_won = (competition_on_square as f64 * winner_share) as i64;
+                                        
+                                        info!("   🏆 Winner: {} bet {:.4} SOL on {} squares → won {:.4} SOL ({:.1}% share)",
+                                            &address[..8],
+                                            *amount as f64 / LAMPORTS_PER_SOL as f64,
+                                            num_squares,
+                                            amount_won as f64 / LAMPORTS_PER_SOL as f64,
+                                            winner_share * 100.0);
+                                        
+                                        // Record comprehensive win to database
+                                        db.record_win(
+                                            reset.round_id as i64,
+                                            address,
+                                            reset.winning_square as i16,
+                                            *amount as i64,
+                                            amount_won,
+                                            &squares.iter().map(|&s| s as i32).collect::<Vec<_>>(),
+                                            num_squares as i16,
+                                            total_deployed,
+                                            num_deployers,
+                                            reset.motherlode,
+                                            is_full_ore,
+                                            ore_earned as f32,
+                                            competition_on_square,
+                                            winner_share as f32,
+                                            tx.slot as i64,
+                                        ).await.ok();
+                                        
+                                        // Update player win record
+                                        db.record_player_win(address, amount_won).await.ok();
+                                        
+                                        // Record in learning engine
+                                        learning_engine.record_win(WinRecord {
+                                            round_id: reset.round_id,
+                                            winner_address: address.clone(),
+                                            winning_square: reset.winning_square as u8,
+                                            amount_bet: *amount,
+                                            amount_won: amount_won as u64,
+                                            squares_bet: squares.clone(),
+                                            num_squares,
+                                            total_round_sol: total_deployed as u64,
+                                            num_deployers: num_deployers as u32,
+                                            is_motherlode: reset.motherlode,
+                                            is_full_ore,
+                                            ore_earned,
+                                            competition_on_square: competition_on_square as u64,
+                                            winner_share_pct: winner_share,
+                                            slot: tx.slot,
+                                            timestamp: tx.block_time,
+                                        });
+                                        
+                                        // Record square count win
+                                        db.record_square_count_win(num_squares as i16, amount_won).await.ok();
+                                        
+                                        winners_found += 1;
+                                    }
+                                }
+                                
+                                if winners_found > 0 {
+                                    info!("   ✅ Recorded {} winner(s) for learning", winners_found);
+                                }
                             }
                             
                             // Record strategy performance for each strategy
@@ -495,15 +745,60 @@ async fn main() {
                         }
                     }
                 }
+                
+                if deploy_count > 0 {
+                    info!("👥 Tracked {} player deploys for learning", deploy_count);
+                }
+                
+                // Periodically run strategy detection in learning engine
+                if learning_engine.total_wins_tracked > 0 && learning_engine.total_wins_tracked % 20 == 0 {
+                    learning_engine.analyze_and_detect_strategies();
+                    let strategies = learning_engine.get_all_strategies();
+                    if let Some(best) = strategies.first() {
+                        info!("{}", format!(
+                            "🎯 Best detected strategy: {} ({} squares, {:.4} SOL, {} competition)",
+                            best.name, best.square_count, best.bet_size_sol, best.target_competition
+                        ).green());
+                        
+                        // Save to database
+                        #[cfg(feature = "database")]
+                        if let Some(ref db) = db {
+                            db.save_detected_strategy(
+                                &best.name,
+                                &best.description,
+                                best.sample_size as i32,
+                                best.win_rate as f32,
+                                best.avg_roi as f32,
+                                best.avg_ore_per_round as f32,
+                                best.square_count as i16,
+                                best.bet_size_sol as f32,
+                                &best.target_competition,
+                                &best.preferred_squares.iter().map(|&s| s as i32).collect::<Vec<_>>(),
+                                best.play_motherlode,
+                                best.confidence as f32,
+                                best.consistent,
+                                &best.examples,
+                            ).await.ok();
+                        }
+                    }
+                }
 
                 // Count instruction types
                 let stats = parser.get_stats();
-                let deploy_count = stats.instruction_counts.get(&OreInstructionType::Deploy).unwrap_or(&0);
+                let total_deploys = stats.instruction_counts.get(&OreInstructionType::Deploy).unwrap_or(&0);
                 let claim_count = stats.instruction_counts.get(&OreInstructionType::ClaimSOL).unwrap_or(&0)
                     + stats.instruction_counts.get(&OreInstructionType::ClaimORE).unwrap_or(&0);
                 
-                info!("📈 Deploys: {} | Claims: {} | Miners: {}", 
-                    deploy_count, claim_count, stats.total_miners_tracked);
+                // Show ore_strategy learning summary periodically
+                let ore_summary = ore_strategy.get_learning_summary();
+                info!("📈 Stats: {} total deploys | {} claims | {} players tracked", 
+                    total_deploys, claim_count, ore_summary["total_players_tracked"]);
+                info!("🧠 Learning: {} wins tracked | {} full ORE wins",
+                    learning_engine.total_wins_tracked, learning_engine.full_ore_wins_tracked);
+                if let Some(optimal) = ore_summary["optimal_square_count"].as_u64() {
+                    info!("🎯 Optimal squares: {} ({})", optimal, 
+                        ore_summary["optimal_reasoning"].as_str().unwrap_or(""));
+                }
             }
             Err(e) => {
                 warn!("Failed to fetch transactions: {}", e);

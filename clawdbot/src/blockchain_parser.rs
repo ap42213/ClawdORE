@@ -12,7 +12,24 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-/// ORE Program ID
+/// ═══════════════════════════════════════════════════════════════════════════════
+/// ORE BLOCKCHAIN PARSER
+/// ═══════════════════════════════════════════════════════════════════════════════
+/// 
+/// This parser ONLY tracks transactions for the ORE mining program.
+/// All wallet tracking is limited to wallets that interact with this program.
+/// 
+/// Tracked transaction types:
+///   - Deploy: Wallet bets SOL on squares (1-25)
+///   - Reset: Round ends, winning square revealed
+///   - ClaimSOL/ClaimORE: Wallet claims rewards
+///   - Automate: Wallet sets up automated mining
+///
+/// Every wallet we track is an ORE program user (miner).
+/// ═══════════════════════════════════════════════════════════════════════════════
+
+/// ORE Program ID - THE ONLY PROGRAM WE TRACK
+/// All transactions must be to this program to be processed
 pub const ORE_PROGRAM_ID: &str = "OREdv7MP3vLxV9TveRrPDNLAbSYaGDM7KhSHRwAr2cz";
 
 /// ORE Instruction Types (from ore-api)
