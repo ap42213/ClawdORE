@@ -1,12 +1,12 @@
 use clawdbot::{
     analytics::AnalyticsEngine,
-    bot::{Bot, BotRunner, BotStatus},
+    bot::BotStatus,
     client::OreClient,
     config::{AnalyticsConfig, BotConfig},
     error::Result,
 };
 use log::{error, info};
-use solana_sdk::signature::read_keypair_file;
+use solana_sdk::signature::{read_keypair_file, Signer};
 use std::sync::{Arc, RwLock};
 use tokio::time::{sleep, Duration};
 
@@ -47,7 +47,7 @@ impl AnalyticsBot {
 
             // Collect round data
             let board = self.client.get_board()?;
-            let current_round = board.round;
+            let current_round = board.round_id;
 
             info!("📈 Collecting analytics for round {}", current_round);
 
@@ -128,55 +128,11 @@ impl AnalyticsBot {
 
         Ok(())
     }
-}
 
-impl Bot for AnalyticsBot {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn status(&self) -> BotStatus {
-        *self.status.read().unwrap()
-    }
-
-    async fn start(&mut self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         info!("Starting {} bot", self.name);
         *self.status.write().unwrap() = BotStatus::Running;
-
-        let self_clone = Self {
-            name: self.name.clone(),
-            status: Arc::clone(&self.status),
-            config: self.config.clone(),
-            client: Arc::clone(&self.client),
-            engine: Arc::clone(&self.engine),
-        };
-
-        tokio::spawn(async move {
-            if let Err(e) = self_clone.analytics_loop().await {
-                error!("Analytics bot error: {}", e);
-                *self_clone.status.write().unwrap() = BotStatus::Error;
-            }
-        });
-
-        Ok(())
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        info!("Stopping {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Stopped;
-        Ok(())
-    }
-
-    async fn pause(&mut self) -> Result<()> {
-        info!("Pausing {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Paused;
-        Ok(())
-    }
-
-    async fn resume(&mut self) -> Result<()> {
-        info!("Resuming {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Running;
-        Ok(())
+        self.analytics_loop().await
     }
 }
 
@@ -199,19 +155,9 @@ async fn main() -> Result<()> {
     // Create client
     let client = OreClient::new(config.rpc_url.clone(), keypair);
 
-    // Create analytics bot
-    let analytics_bot = AnalyticsBot::new(config.analytics.clone(), Arc::new(client));
-
-    // Create and start bot runner
-    let client_for_runner = OreClient::new(
-        config.rpc_url.clone(),
-        read_keypair_file(&config.keypair_path).unwrap(),
-    );
-    let mut runner = BotRunner::new(config, client_for_runner);
-    runner.add_bot(Box::new(analytics_bot));
-
-    // Run
-    runner.run().await?;
+    // Create and run analytics bot
+    let mut analytics_bot = AnalyticsBot::new(config.analytics.clone(), Arc::new(client));
+    analytics_bot.start().await?;
 
     Ok(())
 }

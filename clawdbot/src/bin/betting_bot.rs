@@ -1,12 +1,12 @@
 use clawdbot::{
-    bot::{Bot, BotRunner, BotStatus},
+    bot::BotStatus,
     client::OreClient,
     config::{BotConfig, BettingConfig},
     error::Result,
     strategy::BettingStrategy,
 };
 use log::{error, info, warn};
-use solana_sdk::signature::read_keypair_file;
+use solana_sdk::signature::{read_keypair_file, Signer};
 use std::sync::{Arc, RwLock};
 use tokio::time::{sleep, Duration};
 
@@ -54,7 +54,7 @@ impl BettingBot {
 
             // Get current round
             let board = self.client.get_board()?;
-            let current_round_id = board.round;
+            let current_round_id = board.round_id;
             let mut last_round = self.last_round.write().unwrap();
 
             // Only bet on new rounds
@@ -119,59 +119,11 @@ impl BettingBot {
         info!("🛑 Betting bot stopped");
         Ok(())
     }
-}
 
-impl Bot for BettingBot {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn status(&self) -> BotStatus {
-        *self.status.read().unwrap()
-    }
-
-    async fn start(&mut self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         info!("Starting {} bot", self.name);
         *self.status.write().unwrap() = BotStatus::Running;
-
-        let self_clone = Self {
-            name: self.name.clone(),
-            status: Arc::clone(&self.status),
-            config: self.config.clone(),
-            client: Arc::clone(&self.client),
-            strategy: BettingStrategy::new(
-                self.config.strategy.clone(),
-                self.config.risk_tolerance,
-            ),
-            last_round: Arc::clone(&self.last_round),
-        };
-
-        tokio::spawn(async move {
-            if let Err(e) = self_clone.betting_loop().await {
-                error!("Betting bot error: {}", e);
-                *self_clone.status.write().unwrap() = BotStatus::Error;
-            }
-        });
-
-        Ok(())
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        info!("Stopping {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Stopped;
-        Ok(())
-    }
-
-    async fn pause(&mut self) -> Result<()> {
-        info!("Pausing {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Paused;
-        Ok(())
-    }
-
-    async fn resume(&mut self) -> Result<()> {
-        info!("Resuming {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Running;
-        Ok(())
+        self.betting_loop().await
     }
 }
 
@@ -195,19 +147,9 @@ async fn main() -> Result<()> {
     // Create client
     let client = OreClient::new(config.rpc_url.clone(), keypair);
 
-    // Create betting bot
-    let betting_bot = BettingBot::new(config.betting.clone(), Arc::new(client));
-
-    // Create and start bot runner
-    let client_for_runner = OreClient::new(
-        config.rpc_url.clone(),
-        read_keypair_file(&config.keypair_path).unwrap(),
-    );
-    let mut runner = BotRunner::new(config, client_for_runner);
-    runner.add_bot(Box::new(betting_bot));
-
-    // Run
-    runner.run().await?;
+    // Create and run betting bot
+    let mut betting_bot = BettingBot::new(config.betting.clone(), Arc::new(client));
+    betting_bot.start().await?;
 
     Ok(())
 }

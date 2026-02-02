@@ -1,12 +1,12 @@
 use clawdbot::{
-    bot::{Bot, BotRunner, BotStatus},
+    bot::BotStatus,
     client::OreClient,
     config::{BotConfig, MiningConfig},
     error::Result,
     strategy::MiningStrategy,
 };
 use log::{error, info};
-use solana_sdk::signature::read_keypair_file;
+use solana_sdk::signature::{read_keypair_file, Signer};
 use std::sync::{Arc, RwLock};
 use tokio::time::{sleep, Duration};
 
@@ -60,15 +60,15 @@ impl MinerBot {
 
             // Get current round
             let board = self.client.get_board()?;
-            let round = self.client.get_round(board.round)?;
+            let round = self.client.get_round(board.round_id)?;
 
             info!("📊 Current round: {}, Total deployed: {}", 
-                board.round, 
+                board.round_id, 
                 round.deployed.iter().sum::<u64>()
             );
 
             // Get historical data for strategy
-            let history = self.client.get_rounds(board.round, 10)?
+            let history = self.client.get_rounds(board.round_id, 10)?
                 .into_iter()
                 .map(|(_, r)| r)
                 .collect::<Vec<_>>();
@@ -100,55 +100,11 @@ impl MinerBot {
         info!("🛑 Miner bot stopped");
         Ok(())
     }
-}
 
-impl Bot for MinerBot {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn status(&self) -> BotStatus {
-        *self.status.read().unwrap()
-    }
-
-    async fn start(&mut self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         info!("Starting {} bot", self.name);
         *self.status.write().unwrap() = BotStatus::Running;
-
-        let self_clone = Self {
-            name: self.name.clone(),
-            status: Arc::clone(&self.status),
-            config: self.config.clone(),
-            client: Arc::clone(&self.client),
-            strategy: MiningStrategy::new(self.config.strategy.clone()),
-        };
-
-        tokio::spawn(async move {
-            if let Err(e) = self_clone.mining_loop().await {
-                error!("Miner bot error: {}", e);
-                *self_clone.status.write().unwrap() = BotStatus::Error;
-            }
-        });
-
-        Ok(())
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        info!("Stopping {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Stopped;
-        Ok(())
-    }
-
-    async fn pause(&mut self) -> Result<()> {
-        info!("Pausing {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Paused;
-        Ok(())
-    }
-
-    async fn resume(&mut self) -> Result<()> {
-        info!("Resuming {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Running;
-        Ok(())
+        self.mining_loop().await
     }
 }
 
@@ -170,19 +126,9 @@ async fn main() -> Result<()> {
     // Create client
     let client = OreClient::new(config.rpc_url.clone(), keypair);
 
-    // Create miner bot
-    let miner_bot = MinerBot::new(config.mining.clone(), Arc::new(client));
-
-    // Create and start bot runner
-    let client_for_runner = OreClient::new(
-        config.rpc_url.clone(),
-        read_keypair_file(&config.keypair_path).unwrap(),
-    );
-    let mut runner = BotRunner::new(config, client_for_runner);
-    runner.add_bot(Box::new(miner_bot));
-
-    // Run
-    runner.run().await?;
+    // Create and run miner bot
+    let mut miner_bot = MinerBot::new(config.mining.clone(), Arc::new(client));
+    miner_bot.start().await?;
 
     Ok(())
 }

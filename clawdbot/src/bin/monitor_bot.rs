@@ -1,12 +1,11 @@
 use clawdbot::{
-    bot::{BotRunner, BotStatus},
     client::OreClient,
     config::BotConfig,
     error::Result,
     monitor::MonitorBot,
 };
 use log::info;
-use solana_sdk::signature::read_keypair_file;
+use solana_sdk::signature::{read_keypair_file, Signer};
 use std::sync::Arc;
 
 #[tokio::main]
@@ -28,19 +27,11 @@ async fn main() -> Result<()> {
     let client = OreClient::new(config.rpc_url.clone(), keypair);
     let client_arc = Arc::new(client);
 
-    // Create monitor bot
-    let monitor_bot = MonitorBot::new(config.monitor.clone(), Arc::clone(&client_arc));
-
-    // Create and start bot runner
-    let client_for_runner = OreClient::new(
-        config.rpc_url.clone(),
-        read_keypair_file(&config.keypair_path).unwrap(),
-    );
-    let mut runner = BotRunner::new(config, client_for_runner);
-    runner.add_bot(Box::new(monitor_bot));
-
-    // Run
-    runner.run().await?;
+    // Create and run monitor bot directly
+    let mut monitor_bot = MonitorBot::new(config.monitor.clone(), Arc::clone(&client_arc));
+    
+    // Run monitor loop
+    monitor_bot.start().await?;
 
     Ok(())
 }
