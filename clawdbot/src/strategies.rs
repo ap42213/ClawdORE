@@ -47,6 +47,7 @@ pub struct StrategyEngine {
     history: Vec<RoundHistory>,
     square_stats: [SquareStats; 25],
     whale_positions: HashMap<String, Vec<usize>>, // Whale address -> their favorite squares
+    strategy_weights: HashMap<String, f64>,       // Learned strategy performance
 }
 
 impl StrategyEngine {
@@ -55,7 +56,79 @@ impl StrategyEngine {
             history: Vec::new(),
             square_stats: Default::default(),
             whale_positions: HashMap::new(),
+            strategy_weights: HashMap::new(),
         }
+    }
+
+    /// Load persisted square stats from database
+    pub fn load_square_stats_from_db(&mut self, stats: Vec<(i16, i32, i32, i64, f32, f32, i32, i64)>) {
+        for (square_id, wins, rounds, deployed, win_rate, edge, streak, avg_comp) in stats {
+            if (square_id as usize) < 25 {
+                self.square_stats[square_id as usize] = SquareStats {
+                    wins: wins as u32,
+                    total_rounds: rounds as u32,
+                    total_deployed_when_won: deployed as u64,
+                    total_pot_when_won: 0,
+                    avg_competition: avg_comp as f64,
+                    win_rate: win_rate as f64,
+                    expected_rate: 0.04,
+                    edge: edge as f64,
+                    roi: 0.0,
+                    recent_wins: 0,
+                    streak: streak,
+                };
+            }
+        }
+    }
+
+    /// Load whale positions from database
+    pub fn load_whales_from_db(&mut self, whales: Vec<(String, i64, Vec<i32>)>) {
+        for (address, _deployed, squares) in whales {
+            self.whale_positions.insert(
+                address, 
+                squares.into_iter().map(|s| s as usize).collect()
+            );
+        }
+    }
+
+    /// Load historical rounds from database
+    pub fn load_rounds_from_db(&mut self, rounds: Vec<(i64, i16, Vec<i64>, i64, bool)>) {
+        for (round_id, winning_square, deployed_vec, total, motherlode) in rounds {
+            if winning_square >= 0 && deployed_vec.len() == 25 {
+                let mut deployed = [0u64; 25];
+                for (i, &d) in deployed_vec.iter().enumerate() {
+                    deployed[i] = d as u64;
+                }
+                self.history.push(RoundHistory {
+                    round_id: round_id as u64,
+                    winning_square: winning_square as u8,
+                    deployed,
+                    total_pot: total as u64,
+                    motherlode,
+                    timestamp: None,
+                });
+            }
+        }
+        // Sort by round_id ascending (oldest first)
+        self.history.sort_by_key(|r| r.round_id);
+    }
+
+    /// Load strategy performance weights
+    pub fn load_strategy_weights(&mut self, perf: Vec<(String, i64, i64, f64)>) {
+        for (name, _total, _hits, hit_rate) in perf {
+            // Weight strategies by their historical hit rate
+            self.strategy_weights.insert(name, hit_rate);
+        }
+    }
+
+    /// Get loaded history count
+    pub fn history_count(&self) -> usize {
+        self.history.len()
+    }
+
+    /// Get loaded whale count
+    pub fn whale_count(&self) -> usize {
+        self.whale_positions.len()
     }
 
     /// Add historical round data

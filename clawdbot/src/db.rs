@@ -82,14 +82,52 @@ pub const SCHEMA_STATEMENTS: &[&str] = &[
         created_at TIMESTAMPTZ DEFAULT NOW()
     )"#,
     
+    // Square statistics - learned patterns for each square
+    r#"CREATE TABLE IF NOT EXISTS square_stats (
+        square_id SMALLINT PRIMARY KEY,
+        total_wins INTEGER DEFAULT 0,
+        total_rounds INTEGER DEFAULT 0,
+        total_deployed BIGINT DEFAULT 0,
+        win_rate REAL DEFAULT 0.04,
+        edge REAL DEFAULT 0.0,
+        recent_wins INTEGER DEFAULT 0,
+        streak INTEGER DEFAULT 0,
+        avg_competition BIGINT DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
+    // Whale tracking - learned whale behavior
+    r#"CREATE TABLE IF NOT EXISTS whales (
+        address TEXT PRIMARY KEY,
+        total_deployed BIGINT DEFAULT 0,
+        deploy_count INTEGER DEFAULT 0,
+        favorite_squares INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+        avg_deploy_size BIGINT DEFAULT 0,
+        last_seen TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
+    // Strategy performance - track which strategies work
+    r#"CREATE TABLE IF NOT EXISTS strategy_performance (
+        id SERIAL PRIMARY KEY,
+        strategy_name TEXT NOT NULL,
+        round_id BIGINT,
+        recommended_squares INTEGER[],
+        winning_square SMALLINT,
+        hit BOOLEAN DEFAULT FALSE,
+        confidence REAL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
     // Indexes
     "CREATE INDEX IF NOT EXISTS idx_transactions_signer ON transactions(signer)",
     "CREATE INDEX IF NOT EXISTS idx_transactions_round ON transactions(round_id)",
     "CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(instruction_type)",
     "CREATE INDEX IF NOT EXISTS idx_signals_unprocessed ON signals(processed, target_bot) WHERE NOT processed",
     "CREATE INDEX IF NOT EXISTS idx_rounds_completed ON rounds(completed_at) WHERE completed_at IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_strategy_performance_strategy ON strategy_performance(strategy_name)",
+    "CREATE INDEX IF NOT EXISTS idx_whales_deployed ON whales(total_deployed DESC)",
 ];
-"#;
 
 /// Database connection configuration
 #[derive(Debug, Clone)]
@@ -473,6 +511,216 @@ impl SharedDb {
         .map_err(|e| BotError::Other(format!("Failed to get top miners: {}", e)))?;
         
         Ok(miners)
+    }
+
+    // ==================== LEARNING METHODS ====================
+
+    /// Update square statistics from a completed round
+    #[cfg(feature = "database")]
+    pub async fn update_square_stats(&self, winning_square: i16, deployed: &[i64; 25]) -> Result<()> {
+        for (i, &amount) in deployed.iter().enumerate() {
+            let is_winner = i as i16 == winning_square;
+            let streak_update = if is_winner { 1 } else { -1 };
+            
+            sqlx::query(r#"
+                INSERT INTO square_stats (square_id, total_wins, total_rounds, total_deployed, streak, updated_at)
+                VALUES ($1, $2, 1, $3, $4, NOW())
+                ON CONFLICT (square_id) DO UPDATE SET
+                    total_wins = square_stats.total_wins + $2,
+                    total_rounds = square_stats.total_rounds + 1,
+                    total_deployed = square_stats.total_deployed + $3,
+                    win_rate = (square_stats.total_wins + $2)::REAL / (square_stats.total_rounds + 1)::REAL,
+                    edge = (square_stats.total_wins + $2)::REAL / (square_stats.total_rounds + 1)::REAL - 0.04,
+                    streak = CASE 
+                        WHEN $2 = 1 AND square_stats.streak >= 0 THEN square_stats.streak + 1
+                        WHEN $2 = 0 AND square_stats.streak <= 0 THEN square_stats.streak - 1
+                        ELSE $4 
+                    END,
+                    avg_competition = (square_stats.total_deployed + $3) / (square_stats.total_rounds + 1),
+                    updated_at = NOW()
+            "#)
+            .bind(i as i16)
+            .bind(if is_winner { 1i32 } else { 0i32 })
+            .bind(amount)
+            .bind(streak_update)
+            .execute(&self.pool)
+            .await
+            .ok();
+        }
+        Ok(())
+    }
+
+    /// Load persisted square stats for strategy engine
+    #[cfg(feature = "database")]
+    pub async fn load_square_stats(&self) -> Result<Vec<(i16, i32, i32, i64, f32, f32, i32, i64)>> {
+        let stats = sqlx::query_as::<_, (i16, i32, i32, i64, f32, f32, i32, i64)>(r#"
+            SELECT square_id, total_wins, total_rounds, total_deployed, 
+                   win_rate, edge, streak, avg_competition
+            FROM square_stats
+            ORDER BY square_id
+        "#)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to load square stats: {}", e)))?;
+        
+        Ok(stats)
+    }
+
+    /// Track/update a whale deployer
+    #[cfg(feature = "database")]
+    pub async fn track_whale(&self, address: &str, amount: i64, squares: &[i32]) -> Result<()> {
+        sqlx::query(r#"
+            INSERT INTO whales (address, total_deployed, deploy_count, favorite_squares, avg_deploy_size, last_seen)
+            VALUES ($1, $2, 1, $3, $2, NOW())
+            ON CONFLICT (address) DO UPDATE SET
+                total_deployed = whales.total_deployed + $2,
+                deploy_count = whales.deploy_count + 1,
+                favorite_squares = (
+                    SELECT ARRAY(
+                        SELECT DISTINCT unnest(whales.favorite_squares || $3)
+                        LIMIT 10
+                    )
+                ),
+                avg_deploy_size = (whales.total_deployed + $2) / (whales.deploy_count + 1),
+                last_seen = NOW()
+        "#)
+        .bind(address)
+        .bind(amount)
+        .bind(squares)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to track whale: {}", e)))?;
+        
+        Ok(())
+    }
+
+    /// Load whale data for strategy engine
+    #[cfg(feature = "database")]
+    pub async fn load_whales(&self, min_deployed: i64) -> Result<Vec<(String, i64, Vec<i32>)>> {
+        let whales = sqlx::query_as::<_, (String, i64, Vec<i32>)>(r#"
+            SELECT address, total_deployed, favorite_squares
+            FROM whales
+            WHERE total_deployed >= $1
+            ORDER BY total_deployed DESC
+            LIMIT 50
+        "#)
+        .bind(min_deployed)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to load whales: {}", e)))?;
+        
+        Ok(whales)
+    }
+
+    /// Record strategy performance for learning
+    #[cfg(feature = "database")]
+    pub async fn record_strategy_performance(
+        &self, 
+        strategy_name: &str, 
+        round_id: i64, 
+        recommended_squares: &[i32],
+        winning_square: i16,
+        confidence: f32
+    ) -> Result<()> {
+        let hit = recommended_squares.contains(&(winning_square as i32));
+        
+        sqlx::query(r#"
+            INSERT INTO strategy_performance 
+                (strategy_name, round_id, recommended_squares, winning_square, hit, confidence)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        "#)
+        .bind(strategy_name)
+        .bind(round_id)
+        .bind(recommended_squares)
+        .bind(winning_square)
+        .bind(hit)
+        .bind(confidence)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to record strategy: {}", e)))?;
+        
+        Ok(())
+    }
+
+    /// Get strategy success rates
+    #[cfg(feature = "database")]
+    pub async fn get_strategy_performance(&self) -> Result<Vec<(String, i64, i64, f64)>> {
+        let perf = sqlx::query_as::<_, (String, i64, i64, f64)>(r#"
+            SELECT 
+                strategy_name,
+                COUNT(*) as total_predictions,
+                SUM(CASE WHEN hit THEN 1 ELSE 0 END) as hits,
+                AVG(CASE WHEN hit THEN 1.0 ELSE 0.0 END) as hit_rate
+            FROM strategy_performance
+            GROUP BY strategy_name
+            ORDER BY hit_rate DESC
+        "#)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to get strategy performance: {}", e)))?;
+        
+        Ok(perf)
+    }
+
+    /// Load historical rounds for strategy engine initialization
+    #[cfg(feature = "database")]
+    pub async fn load_round_history(&self, limit: i32) -> Result<Vec<(i64, i16, Vec<i64>, i64, bool)>> {
+        let rounds = sqlx::query_as::<_, (i64, i16, Vec<i64>, i64, bool)>(r#"
+            SELECT round_id, COALESCE(winning_square, -1), deployed_squares, total_deployed, motherlode
+            FROM rounds
+            WHERE winning_square IS NOT NULL
+            ORDER BY round_id DESC
+            LIMIT $1
+        "#)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to load round history: {}", e)))?;
+        
+        Ok(rounds)
+    }
+
+    /// Update round with winning square (when round completes)
+    #[cfg(feature = "database")]
+    pub async fn complete_round(&self, round_id: i64, winning_square: i16, motherlode: bool) -> Result<()> {
+        sqlx::query(r#"
+            UPDATE rounds 
+            SET winning_square = $2, motherlode = $3, completed_at = NOW()
+            WHERE round_id = $1
+        "#)
+        .bind(round_id)
+        .bind(winning_square)
+        .bind(motherlode)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to complete round: {}", e)))?;
+        
+        Ok(())
+    }
+
+    /// Get learning summary
+    #[cfg(feature = "database")]
+    pub async fn get_learning_summary(&self) -> Result<serde_json::Value> {
+        let total_rounds: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM rounds WHERE winning_square IS NOT NULL")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+        
+        let total_whales: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM whales")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+        
+        let total_txs: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
+
+        Ok(serde_json::json!({
+            "completed_rounds": total_rounds.0,
+            "tracked_whales": total_whales.0,
+            "transactions_analyzed": total_txs.0
+        }))
     }
 
     /// Clean up old data

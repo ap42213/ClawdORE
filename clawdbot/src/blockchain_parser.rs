@@ -182,6 +182,15 @@ pub struct ParsedOreTransaction {
     pub deposit_data: Option<DepositData>,
     pub withdraw_data: Option<WithdrawData>,
     pub claim_yield_data: Option<ClaimYieldData>,
+    pub reset_data: Option<ResetData>,
+}
+
+/// Parsed Reset instruction data (round completion)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResetData {
+    pub round_id: u64,
+    pub winning_square: u8,
+    pub motherlode: bool,
 }
 
 /// Deploy event from program logs
@@ -480,6 +489,12 @@ impl BlockchainParser {
                     None
                 };
 
+                let reset_data = if instruction_type == OreInstructionType::Reset {
+                    self.parse_reset_data(&instruction.data)
+                } else {
+                    None
+                };
+
                 return Some(ParsedOreTransaction {
                     signature: signature.to_string(),
                     slot,
@@ -493,11 +508,30 @@ impl BlockchainParser {
                     deposit_data,
                     withdraw_data,
                     claim_yield_data,
+                    reset_data,
                 });
             }
         }
 
         None
+    }
+
+    /// Parse Reset instruction data
+    fn parse_reset_data(&self, data: &[u8]) -> Option<ResetData> {
+        // Reset instruction format: [discriminator(1)] [round_id(8)] [winning_square(1)] [flags(1)]
+        if data.len() < 11 {
+            return None;
+        }
+        
+        let round_id = u64::from_le_bytes(data[1..9].try_into().ok()?);
+        let winning_square = data[9];
+        let motherlode = if data.len() > 10 { data[10] != 0 } else { false };
+        
+        Some(ResetData {
+            round_id,
+            winning_square,
+            motherlode,
+        })
     }
 
     /// Process a parsed transaction and update internal state

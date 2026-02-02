@@ -146,6 +146,60 @@ async fn main() {
     info!("   • Pattern Detection, Kelly Criterion, Quadrant Analysis");
     info!("   • Mean Reversion, Consensus (weighted combination)");
 
+    // Load persisted learning data from database
+    #[cfg(feature = "database")]
+    if let Some(ref db) = db {
+        info!("\n📚 Loading learned data from database...");
+        
+        // Load square statistics
+        if let Ok(stats) = db.load_square_stats().await {
+            if !stats.is_empty() {
+                strategy_engine.load_square_stats_from_db(stats);
+                info!("   ✅ Loaded square statistics for 25 squares");
+            }
+        }
+        
+        // Load whale data
+        if let Ok(whales) = db.load_whales(1_000_000_000).await { // 1+ SOL deployed
+            if !whales.is_empty() {
+                let count = whales.len();
+                strategy_engine.load_whales_from_db(whales);
+                info!("   ✅ Loaded {} whale deployers", count);
+            }
+        }
+        
+        // Load historical rounds
+        if let Ok(rounds) = db.load_round_history(500).await {
+            if !rounds.is_empty() {
+                let count = rounds.len();
+                strategy_engine.load_rounds_from_db(rounds);
+                info!("   ✅ Loaded {} historical rounds", count);
+            }
+        }
+        
+        // Load strategy performance weights
+        if let Ok(perf) = db.get_strategy_performance().await {
+            if !perf.is_empty() {
+                info!("   📊 Strategy Performance:");
+                for (name, total, hits, rate) in &perf {
+                    info!("      • {}: {:.1}% hit rate ({}/{} rounds)", 
+                        name, rate * 100.0, hits, total);
+                }
+                strategy_engine.load_strategy_weights(perf);
+            }
+        }
+        
+        // Get learning summary
+        if let Ok(summary) = db.get_learning_summary().await {
+            info!("\n📈 Learning Summary:");
+            info!("   • Completed rounds analyzed: {}", summary["completed_rounds"]);
+            info!("   • Whales tracked: {}", summary["tracked_whales"]);
+            info!("   • Transactions processed: {}", summary["transactions_analyzed"]);
+        }
+        
+        info!("");
+    }
+
     // Set up Ctrl+C handler
     let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let r = running.clone();
@@ -358,18 +412,86 @@ async fn main() {
                     }
                 }
                 
-                // Track whales (deployers with > 1 SOL)
+                // Track whales (deployers with > 1 SOL) - persist to database
                 for tx in &transactions {
                     if let Some(ref deploy) = tx.deploy_data {
                         if deploy.amount_lamports > 1_000_000_000 { // > 1 SOL = whale
+                            // Track in memory
                             strategy_engine.track_whale(
                                 tx.signer.clone(),
                                 deploy.squares.iter().map(|&s| s as usize).collect()
                             );
+                            
+                            // Persist to database
+                            #[cfg(feature = "database")]
+                            if let Some(ref db) = db {
+                                let squares: Vec<i32> = deploy.squares.iter().map(|&s| s as i32).collect();
+                                db.track_whale(
+                                    &tx.signer, 
+                                    deploy.amount_lamports as i64,
+                                    &squares
+                                ).await.ok();
+                            }
+                            
                             info!("🐋 Whale detected: {} deployed {:.2} SOL to squares {:?}",
                                 &tx.signer[..8],
                                 deploy.amount_lamports as f64 / 1_000_000_000.0,
                                 deploy.squares);
+                        }
+                    }
+                    
+                    // Detect Reset transactions (round completions with winning squares)
+                    if let Some(ref reset) = tx.reset_data {
+                        info!("{}", format!(
+                            "🎯 ROUND {} COMPLETED! Winning square: {} {}",
+                            reset.round_id,
+                            reset.winning_square,
+                            if reset.motherlode { "🎰 MOTHERLODE!" } else { "" }
+                        ).yellow().bold());
+                        
+                        // Update learning - this is the key data!
+                        #[cfg(feature = "database")]
+                        if let Some(ref db) = db {
+                            // Mark round as completed with winning square
+                            db.complete_round(
+                                reset.round_id as i64,
+                                reset.winning_square as i16,
+                                reset.motherlode
+                            ).await.ok();
+                            
+                            // Try to get the round's deployment data for learning
+                            if let Ok(round) = parser.get_round(reset.round_id) {
+                                let deployed: [i64; 25] = round.deployed.map(|d| d as i64);
+                                db.update_square_stats(reset.winning_square as i16, &deployed).await.ok();
+                                info!("📚 Updated square statistics from round {}", reset.round_id);
+                            }
+                            
+                            // Record strategy performance for each strategy
+                            if let Ok(state) = db.get_state("current_strategies").await {
+                                if let Some(strategies) = state {
+                                    if let Some(arr) = strategies.as_array() {
+                                        for strat in arr {
+                                            if let (Some(name), Some(squares), Some(conf)) = (
+                                                strat["name"].as_str(),
+                                                strat["squares"].as_array(),
+                                                strat["confidence"].as_f64()
+                                            ) {
+                                                let sq: Vec<i32> = squares.iter()
+                                                    .filter_map(|s| s.as_i64().map(|n| n as i32))
+                                                    .collect();
+                                                db.record_strategy_performance(
+                                                    name,
+                                                    reset.round_id as i64,
+                                                    &sq,
+                                                    reset.winning_square as i16,
+                                                    conf as f32
+                                                ).await.ok();
+                                            }
+                                        }
+                                        info!("📊 Recorded strategy performance for {} strategies", arr.len());
+                                    }
+                                }
+                            }
                         }
                     }
                 }
