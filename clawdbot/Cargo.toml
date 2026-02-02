@@ -16,6 +16,7 @@ solana-program = "=2.1.0"
 
 # Pin dependencies to avoid edition2024 requirement
 blake3 = "=1.5.4"
+az = "=1.2.1"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
