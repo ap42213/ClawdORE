@@ -9,85 +9,86 @@ use sqlx::FromRow;
 /// Shared database for bot coordination
 /// Uses PostgreSQL on Railway for persistent shared state
 
-// Database schema (will be created automatically)
-pub const SCHEMA: &str = r#"
--- Rounds table: stores all round data
-CREATE TABLE IF NOT EXISTS rounds (
-    round_id BIGINT PRIMARY KEY,
-    start_slot BIGINT,
-    end_slot BIGINT,
-    winning_square SMALLINT,
-    total_deployed BIGINT DEFAULT 0,
-    deployed_squares BIGINT[] DEFAULT ARRAY[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::BIGINT[],
-    total_winnings BIGINT DEFAULT 0,
-    total_vaulted BIGINT DEFAULT 0,
-    motherlode BOOLEAN DEFAULT FALSE,
-    num_deploys INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
-);
-
--- Miners table: tracks all miner accounts
-CREATE TABLE IF NOT EXISTS miners (
-    address TEXT PRIMARY KEY,
-    total_deployed BIGINT DEFAULT 0,
-    total_claimed_sol BIGINT DEFAULT 0,
-    total_claimed_ore BIGINT DEFAULT 0,
-    deploy_count INTEGER DEFAULT 0,
-    claim_count INTEGER DEFAULT 0,
-    automation_enabled BOOLEAN DEFAULT FALSE,
-    favorite_squares INTEGER[] DEFAULT ARRAY[]::INTEGER[],
-    win_rate REAL DEFAULT 0.0,
-    last_seen TIMESTAMPTZ DEFAULT NOW(),
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Transactions table: recent ORE transactions
-CREATE TABLE IF NOT EXISTS transactions (
-    signature TEXT PRIMARY KEY,
-    slot BIGINT,
-    block_time TIMESTAMPTZ,
-    instruction_type TEXT,
-    signer TEXT,
-    round_id BIGINT,
-    amount_lamports BIGINT,
-    squares INTEGER[],
-    success BOOLEAN,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Bot state table: coordination signals between bots
-CREATE TABLE IF NOT EXISTS bot_state (
-    key TEXT PRIMARY KEY,
-    value JSONB,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Analytics snapshots
-CREATE TABLE IF NOT EXISTS analytics_snapshots (
-    id SERIAL PRIMARY KEY,
-    snapshot_type TEXT,
-    data JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Signals table: for bot-to-bot communication
-CREATE TABLE IF NOT EXISTS signals (
-    id SERIAL PRIMARY KEY,
-    signal_type TEXT NOT NULL,
-    source_bot TEXT NOT NULL,
-    target_bot TEXT,  -- NULL means broadcast to all
-    payload JSONB,
-    processed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_transactions_signer ON transactions(signer);
-CREATE INDEX IF NOT EXISTS idx_transactions_round ON transactions(round_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(instruction_type);
-CREATE INDEX IF NOT EXISTS idx_signals_unprocessed ON signals(processed, target_bot) WHERE NOT processed;
-CREATE INDEX IF NOT EXISTS idx_rounds_completed ON rounds(completed_at) WHERE completed_at IS NOT NULL;
+// Database schema statements (executed one at a time)
+pub const SCHEMA_STATEMENTS: &[&str] = &[
+    // Rounds table
+    r#"CREATE TABLE IF NOT EXISTS rounds (
+        round_id BIGINT PRIMARY KEY,
+        start_slot BIGINT,
+        end_slot BIGINT,
+        winning_square SMALLINT,
+        total_deployed BIGINT DEFAULT 0,
+        deployed_squares BIGINT[] DEFAULT ARRAY[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]::BIGINT[],
+        total_winnings BIGINT DEFAULT 0,
+        total_vaulted BIGINT DEFAULT 0,
+        motherlode BOOLEAN DEFAULT FALSE,
+        num_deploys INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        completed_at TIMESTAMPTZ
+    )"#,
+    
+    // Miners table
+    r#"CREATE TABLE IF NOT EXISTS miners (
+        address TEXT PRIMARY KEY,
+        total_deployed BIGINT DEFAULT 0,
+        total_claimed_sol BIGINT DEFAULT 0,
+        total_claimed_ore BIGINT DEFAULT 0,
+        deploy_count INTEGER DEFAULT 0,
+        claim_count INTEGER DEFAULT 0,
+        automation_enabled BOOLEAN DEFAULT FALSE,
+        favorite_squares INTEGER[] DEFAULT ARRAY[]::INTEGER[],
+        win_rate REAL DEFAULT 0.0,
+        last_seen TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
+    // Transactions table
+    r#"CREATE TABLE IF NOT EXISTS transactions (
+        signature TEXT PRIMARY KEY,
+        slot BIGINT,
+        block_time TIMESTAMPTZ,
+        instruction_type TEXT,
+        signer TEXT,
+        round_id BIGINT,
+        amount_lamports BIGINT,
+        squares INTEGER[],
+        success BOOLEAN,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
+    // Bot state table
+    r#"CREATE TABLE IF NOT EXISTS bot_state (
+        key TEXT PRIMARY KEY,
+        value JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
+    // Analytics snapshots
+    r#"CREATE TABLE IF NOT EXISTS analytics_snapshots (
+        id SERIAL PRIMARY KEY,
+        snapshot_type TEXT,
+        data JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
+    // Signals table
+    r#"CREATE TABLE IF NOT EXISTS signals (
+        id SERIAL PRIMARY KEY,
+        signal_type TEXT NOT NULL,
+        source_bot TEXT NOT NULL,
+        target_bot TEXT,
+        payload JSONB,
+        processed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )"#,
+    
+    // Indexes
+    "CREATE INDEX IF NOT EXISTS idx_transactions_signer ON transactions(signer)",
+    "CREATE INDEX IF NOT EXISTS idx_transactions_round ON transactions(round_id)",
+    "CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(instruction_type)",
+    "CREATE INDEX IF NOT EXISTS idx_signals_unprocessed ON signals(processed, target_bot) WHERE NOT processed",
+    "CREATE INDEX IF NOT EXISTS idx_rounds_completed ON rounds(completed_at) WHERE completed_at IS NOT NULL",
+];
 "#;
 
 /// Database connection configuration
@@ -240,12 +241,14 @@ impl SharedDb {
     pub async fn init_schema(&self) -> Result<()> {
         info!("📋 Initializing database schema...");
         
-        sqlx::query(SCHEMA)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| BotError::Other(format!("Schema init failed: {}", e)))?;
+        for (i, statement) in SCHEMA_STATEMENTS.iter().enumerate() {
+            sqlx::query(statement)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| BotError::Other(format!("Schema statement {} failed: {}", i + 1, e)))?;
+        }
         
-        info!("✅ Database schema ready");
+        info!("✅ Database schema ready ({} tables/indexes created)", SCHEMA_STATEMENTS.len());
         Ok(())
     }
 
