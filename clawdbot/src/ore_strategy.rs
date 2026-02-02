@@ -158,7 +158,7 @@ impl OreStrategyEngine {
     pub fn load_square_count_stats(&mut self, stats: Vec<SquareCountStats>) {
         for stat in stats {
             if stat.count > 0 && stat.count <= 25 {
-                self.square_count_performance[stat.count as usize] = stat;
+                self.square_count_performance[stat.count as usize] = stat.clone();
             }
         }
     }
@@ -401,7 +401,7 @@ impl OreStrategyEngine {
         let (optimal_count, _, square_reasoning) = self.get_optimal_square_count();
         
         // Use consensus squares if available, otherwise pick based on empty squares
-        let squares = if !consensus_squares.is_empty() && consensus_confidence > 0.4 {
+        let squares: Vec<usize> = if !consensus_squares.is_empty() && consensus_confidence > 0.4 {
             consensus_squares.iter()
                 .take(optimal_count as usize)
                 .copied()
@@ -511,23 +511,23 @@ impl OreStrategyEngine {
             // Boost the confidence in this square count
             stats.times_used += 100; // Add significant weight
             stats.win_rate = strategy["confidence"].as_f64().unwrap_or(0.5);
-            tracing::info!("📊 Applied detected strategy: {} squares", count);
+            log::info!("📊 Applied detected strategy: {} squares", count);
         }
         
         if let Some(bet_size) = strategy["bet_size_sol"].as_f64() {
             // Adjust max bet per round based on detected successful patterns
             if bet_size > 0.001 && bet_size <= 0.1 {
                 self.max_bet_per_round_sol = bet_size.min(0.04); // Still cap at our limit
-                tracing::info!("💰 Adjusted bet size to {:.4} SOL", self.max_bet_per_round_sol);
+                log::info!("💰 Adjusted bet size to {:.4} SOL", self.max_bet_per_round_sol);
             }
         }
         
         if let Some(target) = strategy["target_competition"].as_str() {
             // Log the target competition level for decision making
-            tracing::info!("🎯 Target competition: {}", target);
+            log::info!("🎯 Target competition: {}", target);
         }
         
-        tracing::info!("🧠 Strategy applied: {} (confidence: {:.0}%)",
+        log::info!("🧠 Strategy applied: {} (confidence: {:.0}%)",
             strategy["name"].as_str().unwrap_or("Unknown"),
             strategy["confidence"].as_f64().unwrap_or(0.0) * 100.0);
     }
@@ -546,7 +546,7 @@ impl OreStrategyEngine {
             if strategy["confidence"].as_f64().unwrap_or(0.0) > 0.5 {
                 self.apply_detected_strategy(strategy);
             } else {
-                tracing::info!("🔍 Best strategy confidence too low ({:.0}%), using defaults",
+                log::info!("🔍 Best strategy confidence too low ({:.0}%), using defaults",
                     strategy["confidence"].as_f64().unwrap_or(0.0) * 100.0);
             }
         }

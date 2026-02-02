@@ -216,7 +216,7 @@ impl LearningEngine {
         
         // Track competition preference
         player.avg_round_competition = 
-            ((player.avg_round_competition as f64 * (n - 1.0)) + round_total_sol as f64) / n as u64;
+            (((player.avg_round_competition as f64 * (n - 1.0)) + round_total_sol as f64) / n) as u64;
         player.prefers_low_competition = 
             (player.avg_round_competition as f64 / LAMPORTS_PER_SOL as f64) < 5.0;
         
