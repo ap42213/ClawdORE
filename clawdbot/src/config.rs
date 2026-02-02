@@ -167,6 +167,7 @@ pub struct AlertConfig {
 impl Default for BotConfig {
     fn default() -> Self {
         Self {
+            mode: "simulation".to_string(),
             rpc_url: "https://api.mainnet-beta.solana.com".to_string(),
             ws_url: Some("wss://api.mainnet-beta.solana.com".to_string()),
             keypair_path: "~/.config/solana/id.json".to_string(),

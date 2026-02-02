@@ -41,7 +41,7 @@ impl TransactionBuilder {
     }
 
     /// Build and sign the transaction
-    pub fn build(self) -> Result<Transaction> {
+    pub fn build(self) -> Result<(Transaction, Arc<OreClient>)> {
         let recent_blockhash = self.client.rpc_client.get_latest_blockhash()?;
         
         let mut transaction = Transaction::new_with_payer(
@@ -51,21 +51,21 @@ impl TransactionBuilder {
         
         transaction.sign(&[&*self.client.keypair], recent_blockhash);
         
-        Ok(transaction)
+        Ok((transaction, self.client))
     }
 
     /// Build and send the transaction
     pub fn send(self) -> Result<String> {
-        let transaction = self.build()?;
-        self.client.send_transaction(transaction)
+        let (transaction, client) = self.build()?;
+        client.send_transaction(transaction)
     }
 
     /// Build transaction with simulation first
     pub async fn simulate_and_send(self) -> Result<String> {
-        let transaction = self.build()?;
+        let (transaction, client) = self.build()?;
         
         // Simulate first
-        let result = self.client.rpc_client.simulate_transaction(&transaction)?;
+        let result = client.rpc_client.simulate_transaction(&transaction)?;
         
         if result.value.err.is_some() {
             return Err(crate::error::BotError::TransactionFailed(
@@ -74,24 +74,23 @@ impl TransactionBuilder {
         }
         
         // Send if simulation passed
-        self.client.send_transaction(transaction)
+        client.send_transaction(transaction)
     }
 }
 
 /// Helper to build ORE-specific transactions
 pub mod ore_transactions {
     use super::*;
-    use ore_api::instruction::*;
 
     /// Build a mine instruction transaction
     pub fn build_mine_tx(
         client: Arc<OreClient>,
-        square: usize,
-        amount: u64,
+        _square: usize,
+        _amount: u64,
     ) -> Result<Transaction> {
         // This is a placeholder - actual implementation would use ore-api
-        TransactionBuilder::new(client)
-            .build()
+        let (tx, _) = TransactionBuilder::new(client).build()?;
+        Ok(tx)
     }
 
     /// Build a claim rewards transaction
@@ -99,19 +98,19 @@ pub mod ore_transactions {
         client: Arc<OreClient>,
     ) -> Result<Transaction> {
         // Placeholder for claim transaction
-        TransactionBuilder::new(client)
-            .build()
+        let (tx, _) = TransactionBuilder::new(client).build()?;
+        Ok(tx)
     }
 
     /// Build a bet transaction
     pub fn build_bet_tx(
         client: Arc<OreClient>,
-        squares: &[usize],
-        amounts: &[u64],
+        _squares: &[usize],
+        _amounts: &[u64],
     ) -> Result<Transaction> {
         // Placeholder for betting transaction
-        TransactionBuilder::new(client)
-            .build()
+        let (tx, _) = TransactionBuilder::new(client).build()?;
+        Ok(tx)
     }
 }
 

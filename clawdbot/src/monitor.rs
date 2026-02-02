@@ -1,12 +1,12 @@
 use crate::{
-    bot::{Bot, BotStatus},
+    bot::BotStatus,
     client::OreClient,
     config::MonitorConfig,
     error::Result,
 };
 use colored::*;
 use log::{info, warn};
-use ore_api::state::{Board, Miner, Treasury};
+use ore_api::state::Board;
 use std::sync::{Arc, RwLock};
 use tokio::time::{sleep, Duration};
 
@@ -31,6 +31,26 @@ impl MonitorBot {
         }
     }
 
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn status(&self) -> BotStatus {
+        *self.status.read().unwrap()
+    }
+
+    pub async fn start(&mut self) -> Result<()> {
+        info!("Starting {} bot", self.name);
+        *self.status.write().unwrap() = BotStatus::Running;
+        self.monitor_loop().await
+    }
+
+    pub async fn stop(&mut self) -> Result<()> {
+        info!("Stopping {} bot", self.name);
+        *self.status.write().unwrap() = BotStatus::Stopped;
+        Ok(())
+    }
+
     async fn monitor_loop(&self) -> Result<()> {
         loop {
             // Check if bot should stop
@@ -47,15 +67,21 @@ impl MonitorBot {
 
             // Perform monitoring tasks
             if self.config.track_balance {
-                self.check_balance().await?;
+                if let Err(e) = self.check_balance().await {
+                    warn!("Balance check failed: {}", e);
+                }
             }
 
             if self.config.track_rounds {
-                self.check_round_status().await?;
+                if let Err(e) = self.check_round_status().await {
+                    warn!("Round check failed: {}", e);
+                }
             }
 
             if self.config.track_competition {
-                self.check_competition().await?;
+                if let Err(e) = self.check_competition().await {
+                    warn!("Competition check failed: {}", e);
+                }
             }
 
             // Sleep before next check
@@ -107,14 +133,14 @@ impl MonitorBot {
         let mut last_round = self.last_round.write().unwrap();
 
         if *last_round == 0 {
-            *last_round = board.round;
-            info!("📊 Current round: {}", board.round);
+            *last_round = board.round_id;
+            info!("📊 Current round: {}", board.round_id);
             return Ok(());
         }
 
-        if board.round != *last_round {
-            info!("{}", format!("🎲 New round started: {} → {}", *last_round, board.round).cyan());
-            *last_round = board.round;
+        if board.round_id != *last_round {
+            info!("{}", format!("🎲 New round started: {} → {}", *last_round, board.round_id).cyan());
+            *last_round = board.round_id;
 
             // Show round summary
             self.print_round_summary(&board).await?;
@@ -125,14 +151,8 @@ impl MonitorBot {
 
     async fn print_round_summary(&self, board: &Board) -> Result<()> {
         println!("\n{}", "═══════════════════════════════════════".cyan());
-        println!("{}", format!("Round #{}", board.round).cyan().bold());
+        println!("{}", format!("Round #{}", board.round_id).cyan().bold());
         println!("{}", "═══════════════════════════════════════".cyan());
-
-        // Get treasury info
-        if let Ok(treasury) = self.client.get_treasury() {
-            println!("💎 Total Staked: {} ORE", treasury.total_staked);
-            println!("🔥 Motherlode Pool: {} ORE", treasury.motherlode);
-        }
 
         // Get miner info
         if let Ok(Some(miner)) = self.client.get_miner() {
@@ -177,57 +197,6 @@ impl MonitorBot {
         info!("🔥 Hottest square: #{} with {} lamports", max_square, max_deployed);
         info!("❄️  Coldest square: #{} with {} lamports", min_square, min_deployed);
 
-        Ok(())
-    }
-}
-
-impl Bot for MonitorBot {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn status(&self) -> BotStatus {
-        *self.status.read().unwrap()
-    }
-
-    async fn start(&mut self) -> Result<()> {
-        info!("Starting {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Running;
-
-        let self_clone = Self {
-            name: self.name.clone(),
-            status: Arc::clone(&self.status),
-            config: self.config.clone(),
-            client: Arc::clone(&self.client),
-            last_balance: Arc::clone(&self.last_balance),
-            last_round: Arc::clone(&self.last_round),
-        };
-
-        tokio::spawn(async move {
-            if let Err(e) = self_clone.monitor_loop().await {
-                log::error!("Monitor bot error: {}", e);
-                *self_clone.status.write().unwrap() = BotStatus::Error;
-            }
-        });
-
-        Ok(())
-    }
-
-    async fn stop(&mut self) -> Result<()> {
-        info!("Stopping {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Stopped;
-        Ok(())
-    }
-
-    async fn pause(&mut self) -> Result<()> {
-        info!("Pausing {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Paused;
-        Ok(())
-    }
-
-    async fn resume(&mut self) -> Result<()> {
-        info!("Resuming {} bot", self.name);
-        *self.status.write().unwrap() = BotStatus::Running;
         Ok(())
     }
 }

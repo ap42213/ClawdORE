@@ -3,8 +3,8 @@ use clawdbot::{
     config::BotConfig,
     simulation::SimulationEngine,
 };
-use log::{error, info};
-use solana_sdk::signature::read_keypair_file;
+use log::{error, info, warn};
+use solana_sdk::signature::{read_keypair_file, Signer};
 use std::sync::Arc;
 
 #[tokio::main]

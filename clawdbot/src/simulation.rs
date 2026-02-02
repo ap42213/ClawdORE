@@ -55,13 +55,13 @@ impl SimulationEngine {
     async fn fetch_current_round(&self) -> Result<OreRound> {
         // Get board and current round
         let board = self.client.get_board()?;
-        let round = self.client.get_round(board.round)?;
+        let round = self.client.get_round(board.round_id)?;
 
         // Determine outcome type
         let outcome = self.determine_outcome(&round)?;
 
         Ok(OreRound {
-            round_id: board.round,
+            round_id: board.round_id,
             timestamp: chrono::Utc::now().timestamp(),
             outcome,
             total_participants: 0, // Would need to fetch from chain

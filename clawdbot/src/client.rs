@@ -1,5 +1,5 @@
 use crate::error::{BotError, Result};
-use ore_api::state::{Board, Miner, Round, Treasury};
+use ore_api::state::{Board, Miner, Round, Treasury, board_pda, miner_pda, round_pda, treasury_pda};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -12,8 +12,8 @@ use backoff::{ExponentialBackoff, future::retry};
 use std::time::Duration;
 
 pub struct OreClient {
-    rpc_client: Arc<RpcClient>,
-    keypair: Arc<Keypair>,
+    pub rpc_client: Arc<RpcClient>,
+    pub keypair: Arc<Keypair>,
 }
 
 impl OreClient {
@@ -60,22 +60,23 @@ impl OreClient {
     }
 
     pub fn get_board(&self) -> Result<Board> {
-        let board_address = ore_api::consts::BOARD_ADDRESS;
+        let (board_address, _) = board_pda();
         let account = self.rpc_client.get_account(&board_address)?;
         
-        // Deserialize the board data
-        let board = bytemuck::try_from_bytes::<Board>(&account.data)
+        // Skip discriminator (8 bytes)
+        let board = bytemuck::try_from_bytes::<Board>(&account.data[8..])
             .map_err(|e| BotError::Serialization(format!("Failed to deserialize Board: {:?}", e)))?;
         
         Ok(*board)
     }
 
     pub fn get_miner(&self) -> Result<Option<Miner>> {
-        let (miner_address, _) = ore_api::state::miner_pda(self.keypair.pubkey());
+        let (miner_address, _) = miner_pda(self.keypair.pubkey());
         
         match self.rpc_client.get_account(&miner_address) {
             Ok(account) => {
-                let miner = bytemuck::try_from_bytes::<Miner>(&account.data)
+                // Skip discriminator (8 bytes)
+                let miner = bytemuck::try_from_bytes::<Miner>(&account.data[8..])
                     .map_err(|e| BotError::Serialization(format!("Failed to deserialize Miner: {:?}", e)))?;
                 Ok(Some(*miner))
             }
@@ -84,20 +85,22 @@ impl OreClient {
     }
 
     pub fn get_round(&self, round_id: u64) -> Result<Round> {
-        let (round_address, _) = ore_api::state::round_pda(round_id);
+        let (round_address, _) = round_pda(round_id);
         let account = self.rpc_client.get_account(&round_address)?;
         
-        let round = bytemuck::try_from_bytes::<Round>(&account.data)
+        // Skip discriminator (8 bytes)
+        let round = bytemuck::try_from_bytes::<Round>(&account.data[8..])
             .map_err(|e| BotError::Serialization(format!("Failed to deserialize Round: {:?}", e)))?;
         
         Ok(*round)
     }
 
     pub fn get_treasury(&self) -> Result<Treasury> {
-        let treasury_address = ore_api::consts::TREASURY_ADDRESS;
+        let (treasury_address, _) = treasury_pda();
         let account = self.rpc_client.get_account(&treasury_address)?;
         
-        let treasury = bytemuck::try_from_bytes::<Treasury>(&account.data)
+        // Skip discriminator (8 bytes)
+        let treasury = bytemuck::try_from_bytes::<Treasury>(&account.data[8..])
             .map_err(|e| BotError::Serialization(format!("Failed to deserialize Treasury: {:?}", e)))?;
         
         Ok(*treasury)
@@ -105,7 +108,7 @@ impl OreClient {
 
     pub fn get_current_round(&self) -> Result<Round> {
         let board = self.get_board()?;
-        self.get_round(board.round)
+        self.get_round(board.round_id)
     }
 
     pub fn send_transaction(&self, transaction: Transaction) -> Result<String> {
@@ -120,7 +123,7 @@ impl OreClient {
     }
 
     pub fn get_block_time(&self, slot: u64) -> Result<Option<i64>> {
-        Ok(self.rpc_client.get_block_time(slot)?)
+        Ok(self.rpc_client.get_block_time(slot).ok())
     }
 
     /// Get multiple miner accounts for analysis
@@ -129,7 +132,7 @@ impl OreClient {
         
         for address in addresses {
             if let Ok(account) = self.rpc_client.get_account(address) {
-                if let Ok(miner) = bytemuck::try_from_bytes::<Miner>(&account.data) {
+                if let Ok(miner) = bytemuck::try_from_bytes::<Miner>(&account.data[8..]) {
                     miners.push((*address, *miner));
                 }
             }

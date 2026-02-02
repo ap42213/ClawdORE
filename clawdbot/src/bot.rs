@@ -1,5 +1,5 @@
 use crate::{client::OreClient, config::BotConfig, error::Result};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
@@ -12,17 +12,7 @@ pub enum BotStatus {
     Error,
 }
 
-pub trait Bot: Send + Sync {
-    fn name(&self) -> &str;
-    fn status(&self) -> BotStatus;
-    async fn start(&mut self) -> Result<()>;
-    async fn stop(&mut self) -> Result<()>;
-    async fn pause(&mut self) -> Result<()>;
-    async fn resume(&mut self) -> Result<()>;
-}
-
 pub struct BotRunner {
-    bots: Vec<Box<dyn Bot>>,
     config: Arc<BotConfig>,
     client: Arc<OreClient>,
 }
@@ -30,48 +20,23 @@ pub struct BotRunner {
 impl BotRunner {
     pub fn new(config: BotConfig, client: OreClient) -> Self {
         Self {
-            bots: Vec::new(),
             config: Arc::new(config),
             client: Arc::new(client),
         }
     }
 
-    pub fn add_bot(&mut self, bot: Box<dyn Bot>) {
-        self.bots.push(bot);
-    }
-
     pub async fn run(&mut self) -> Result<()> {
         info!("Starting ClawdBot system...");
         
-        // Start all bots
-        for bot in &mut self.bots {
-            info!("Starting bot: {}", bot.name());
-            if let Err(e) = bot.start().await {
-                error!("Failed to start bot {}: {}", bot.name(), e);
-            }
-        }
-
         // Main monitoring loop
         loop {
             sleep(Duration::from_secs(10)).await;
-            
-            // Check bot statuses
-            for bot in &self.bots {
-                debug!("Bot {} status: {:?}", bot.name(), bot.status());
-            }
+            debug!("Bot running...");
         }
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
         info!("Shutting down ClawdBot system...");
-        
-        for bot in &mut self.bots {
-            info!("Stopping bot: {}", bot.name());
-            if let Err(e) = bot.stop().await {
-                error!("Failed to stop bot {}: {}", bot.name(), e);
-            }
-        }
-        
         Ok(())
     }
 
