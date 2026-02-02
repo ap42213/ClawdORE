@@ -15,11 +15,30 @@ Set to: `clawdbot`
 
 | Bot | `BOT_TYPE` Value | Description |
 |-----|-----------------|-------------|
-| **Parser Bot** | `parser-bot` (default) | Expert blockchain parser - monitors ALL ORE transactions |
+| **Coordinator Bot** | `coordinator-bot` (default) | Central hub - monitors blockchain, stores data, coordinates all bots |
+| **Parser Bot** | `parser-bot` | Expert blockchain parser with visual output |
 | **Monitor Bot** | `monitor-bot` | Read-only monitoring of ORE rounds |
 | **Miner Bot** | `miner-bot` | Automated mining (requires `BOT_MODE=live`) |
 | **Betting Bot** | `betting-bot` | Automated betting (requires `BOT_MODE=live`) |
 | **Analytics Bot** | `analytics-bot` | Collects and displays ORE statistics |
+
+---
+
+## 🔗 Database Setup (REQUIRED for Coordinator)
+
+The coordinator bot requires PostgreSQL for shared state and bot coordination.
+
+### Add PostgreSQL in Railway:
+1. Click **"+ New"** in your Railway project
+2. Select **"Database"** → **"PostgreSQL"**
+3. Railway auto-injects `DATABASE_URL` into your service
+
+### What the Database Stores:
+- **Rounds**: Complete history of all ORE rounds with results
+- **Miners**: Tracked miner accounts with statistics
+- **Transactions**: Recent ORE transactions
+- **Signals**: Bot-to-bot communication messages
+- **State**: Key-value store for coordination
 
 ---
 
@@ -31,6 +50,7 @@ Set to: `clawdbot`
 |----------|-------------|---------|
 | `RPC_URL` | Solana RPC endpoint | `https://api.mainnet-beta.solana.com` |
 | `KEYPAIR_B58` | Base58 encoded private key | `5K8hg...` (64 bytes as base58) |
+| `DATABASE_URL` | PostgreSQL connection (auto-set by Railway) | `postgresql://...` |
 
 ### Alternative Keypair Methods
 
@@ -48,11 +68,20 @@ You can use **ONE** of these:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BOT_TYPE` | `parser-bot` | Which bot to run (see table above) |
+| `BOT_TYPE` | `coordinator-bot` | Which bot to run (see table above) |
 | `BOT_MODE` | `simulation` | `simulation`, `monitor`, or `live` |
 | `RUST_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 ⚠️ **Important**: Set `BOT_MODE=live` only if you want real transactions!
+
+---
+
+## 🎯 Coordinator Bot Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COORDINATOR_INTERVAL` | `15` | Seconds between coordination updates |
+| `COORDINATOR_TX_LIMIT` | `100` | Number of transactions to process per cycle |
 
 ---
 

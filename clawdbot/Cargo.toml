@@ -48,8 +48,8 @@ bs58 = "0.5"
 # HTTP client for API calls
 reqwest = { version = "0.12", features = ["json"] }
 
-# Database (optional, for storing analytics)
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls"], optional = true }
+# Database (optional, for bot coordination)
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "chrono", "json"], optional = true }
 
 [features]
 default = []
@@ -74,3 +74,7 @@ path = "src/bin/monitor_bot.rs"
 [[bin]]
 name = "parser-bot"
 path = "src/bin/parser_bot.rs"
+
+[[bin]]
+name = "coordinator-bot"
+path = "src/bin/coordinator_bot.rs"

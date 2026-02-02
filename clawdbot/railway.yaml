@@ -5,10 +5,25 @@ build:
   dockerfilePath: Dockerfile
 
 deploy:
-  # Default to parser bot - can override with BOT_TYPE env var
-  # Options: parser-bot, monitor-bot, miner-bot, betting-bot, analytics-bot
-  startCommand: ./parser-bot
+  # Default to coordinator bot - can override with BOT_TYPE env var
+  # Options: coordinator-bot, parser-bot, monitor-bot, miner-bot, betting-bot, analytics-bot
+  startCommand: ./start.sh
   restartPolicyType: ON_FAILURE
   restartPolicyMaxRetries: 10
-  healthcheckPath: /
-  healthcheckTimeout: 30
+
+# Environment variables required:
+# - RPC_URL: Solana RPC URL (required)
+# - KEYPAIR_B58: Base58 encoded keypair (optional, for wallet features)
+# - BOT_TYPE: Which bot to run (default: coordinator-bot)
+# - DATABASE_URL: PostgreSQL connection string (auto-set by Railway PostgreSQL addon)
+#
+# Bot Coordination:
+# The coordinator-bot is the central hub that:
+# - Monitors the blockchain for ORE transactions
+# - Stores round/miner/transaction data in PostgreSQL
+# - Sends signals to other bots via the database
+#
+# To enable multi-bot coordination:
+# 1. Add PostgreSQL addon in Railway dashboard
+# 2. Deploy coordinator-bot as primary service
+# 3. Deploy other bots (miner-bot, etc.) as additional services

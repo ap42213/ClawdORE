@@ -8,6 +8,7 @@ pub mod monitor;
 pub mod utils;
 pub mod ore_round;
 pub mod blockchain_parser;
+pub mod db;
 
 pub use bot::*;
 pub use client::*;

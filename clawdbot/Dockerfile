@@ -13,8 +13,8 @@ WORKDIR /app
 # Copy source code
 COPY . .
 
-# Build release
-RUN cargo build --release
+# Build release with database feature for bot coordination
+RUN cargo build --release --features database
 
 # Runtime image
 FROM debian:bookworm-slim
@@ -33,13 +33,14 @@ COPY --from=builder /app/target/release/parser-bot /app/
 COPY --from=builder /app/target/release/miner-bot /app/
 COPY --from=builder /app/target/release/betting-bot /app/
 COPY --from=builder /app/target/release/analytics-bot /app/
+COPY --from=builder /app/target/release/coordinator-bot /app/
 
 # Create startup script that selects bot based on BOT_TYPE env var
 RUN echo '#!/bin/sh\n\
-BOT=${BOT_TYPE:-parser-bot}\n\
+BOT=${BOT_TYPE:-coordinator-bot}\n\
 echo "Starting $BOT..."\n\
 exec /app/$BOT\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
-# Default to parser bot via start script
+# Default to coordinator bot (central hub) via start script
 CMD ["/app/start.sh"]
