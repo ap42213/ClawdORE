@@ -17,7 +17,7 @@ pub const ORE_PROGRAM_ID: &str = "OREdv7MP3vLxV9TveRrPDNLAbSYaGDM7KhSHRwAr2cz";
 
 /// ORE Instruction Types (from ore-api)
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum OreInstructionType {
     // Mining
     Automate = 0,
