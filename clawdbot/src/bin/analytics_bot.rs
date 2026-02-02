@@ -99,12 +99,26 @@ impl AnalyticsBot {
                 db.send_signal(&signal).await.ok();
             }
 
-            let board = self.client.get_board()?;
+            let board = match self.client.get_board() {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!("Failed to get board: {} - retrying in 30s", e);
+                    sleep(Duration::from_secs(30)).await;
+                    continue;
+                }
+            };
             let current_round = board.round_id;
 
             info!("📈 Collecting analytics for round {}", current_round);
 
-            let rounds = self.client.get_rounds(current_round, self.config.history_depth)?;
+            let rounds = match self.client.get_rounds(current_round, self.config.history_depth) {
+                Ok(r) => r,
+                Err(e) => {
+                    warn!("Failed to get rounds: {} - retrying in 30s", e);
+                    sleep(Duration::from_secs(30)).await;
+                    continue;
+                }
+            };
 
             {
                 let mut engine = self.engine.write().unwrap();
@@ -115,12 +129,21 @@ impl AnalyticsBot {
                 }
             }
 
-            let analytics = {
+            let analytics = match {
                 let engine = self.engine.read().unwrap();
-                engine.get_overall_analytics()?
+                engine.get_overall_analytics()
+            } {
+                Ok(a) => a,
+                Err(e) => {
+                    warn!("Failed to get analytics: {} - retrying in 30s", e);
+                    sleep(Duration::from_secs(30)).await;
+                    continue;
+                }
             };
 
-            self.display_analytics(&analytics)?;
+            if let Err(e) = self.display_analytics(&analytics) {
+                warn!("Failed to display analytics: {}", e);
+            }
 
             // Store analytics in database
             #[cfg(feature = "database")]
@@ -134,9 +157,15 @@ impl AnalyticsBot {
                 })).await.ok();
             }
 
-            let predictions = {
+            let predictions = match {
                 let engine = self.engine.read().unwrap();
-                engine.predict_winning_squares(5)?
+                engine.predict_winning_squares(5)
+            } {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Failed to get predictions: {}", e);
+                    vec![]
+                }
             };
 
             info!("🔮 Predicted top 5 squares: {:?}", predictions);
