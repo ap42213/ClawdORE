@@ -177,7 +177,7 @@ async fn main() {
     };
 
     info!("📡 RPC: {}", config.rpc_url);
-    info!("🎯 ORE Program: OREdv7MP3vLxV9TveRrPDNLAbSYaGDM7KhSHRwAr2cz");
+    info!("🎯 ORE Program: oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv");
     info!("═══════════════════════════════════════════════════════════════");
 
     // Create parser

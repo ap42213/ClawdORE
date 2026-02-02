@@ -31,14 +31,14 @@ async fn main() {
     ║   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝╚═╝  ╚═══╝ ╚═════╝    ║
     ║                                                                       ║
     ║    Deep Learning Bot - Tracking ALL ORE Program Wallets On-Chain     ║
-    ║    Program: OREdv7MP3vLxV9TveRrPDNLAbSYaGDM7KhSHRwAr2cz              ║
+    ║    Program: oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv              ║
     ╚═══════════════════════════════════════════════════════════════════════╝
     "#.bright_magenta());
 
     info!("🧠 ORE Learning Bot Starting...");
     info!("═══════════════════════════════════════════════════════════════");
     info!("🎯 TRACKING: ALL wallets using ORE program on-chain");
-    info!("📍 Program ID: OREdv7MP3vLxV9TveRrPDNLAbSYaGDM7KhSHRwAr2cz");
+    info!("📍 Program ID: oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv");
     info!("🔍 Looking for: Deploy, Reset, ClaimSOL, ClaimORE transactions");
     info!("📊 Goal: Build profiles of ALL ORE miners, find winning patterns");
     info!("");

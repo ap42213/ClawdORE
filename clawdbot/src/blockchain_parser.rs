@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 /// ORE Program ID - THE ONLY PROGRAM WE TRACK
 /// All transactions must be to this program to be processed
-pub const ORE_PROGRAM_ID: &str = "OREdv7MP3vLxV9TveRrPDNLAbSYaGDM7KhSHRwAr2cz";
+pub const ORE_PROGRAM_ID: &str = "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv";
 
 /// ORE Instruction Types (from ore-api)
 #[repr(u8)]

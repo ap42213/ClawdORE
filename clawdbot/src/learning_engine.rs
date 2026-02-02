@@ -6,7 +6,7 @@ use std::collections::HashMap;
 /// ═══════════════════════════════════════════════════════════════════════════════
 /// 
 /// SCOPE: ONLY wallets interacting with the ORE program
-/// Program ID: OREdv7MP3vLxV9TveRrPDNLAbSYaGDM7KhSHRwAr2cz
+/// Program ID: oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv
 ///
 /// We track EVERY wallet that:
 ///   - Deploys SOL to the ORE mining game (Deploy instruction)
