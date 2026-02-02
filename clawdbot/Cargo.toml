@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Solana dependencies
-solana-sdk = "2.1"
-solana-client = "2.1"
-solana-program = "2.1"
+# Solana dependencies - pinned to 2.1.0 for ore-api compatibility
+solana-sdk = "=2.1.0"
+solana-client = "=2.1.0"
+solana-program = "=2.1.0"
 anchor-client = "0.30"
 anchor-lang = "0.30"
 spl-token = "6.0"
