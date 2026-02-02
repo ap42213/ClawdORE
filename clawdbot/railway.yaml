@@ -7,10 +7,12 @@ build:
       setup:
         nixPkgs:
           - rustup
-          - cargo
           - gcc
           - openssl
           - pkg-config
+        cmds:
+          - rustup default 1.85.0
+          - rustup target add x86_64-unknown-linux-gnu
       build:
         cmds:
           - cargo build --release --bin simulation-bot
