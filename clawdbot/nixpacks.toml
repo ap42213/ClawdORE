@@ -1,3 +1,9 @@
+[phases.setup]
+nixPkgs = ["gcc", "openssl", "pkg-config"]
+
+[phases.install]
+cmds = ["echo 'Skipping install phase'"]
+
 [phases.build]
 cmds = ["cargo build --release"]
 
