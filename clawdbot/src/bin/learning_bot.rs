@@ -122,7 +122,7 @@ async fn main() {
                         num_deployers: win.num_deployers as u32,
                         is_motherlode: win.is_motherlode,
                         is_full_ore: win.is_full_ore,
-                        ore_earned: win.ore_earned,
+                        ore_earned: win.ore_earned as f64,
                         competition_on_square: 0,
                         winner_share_pct: 0.0,
                         slot: 0,
