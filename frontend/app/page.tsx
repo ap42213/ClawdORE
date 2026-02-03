@@ -133,11 +133,16 @@ export default function Home() {
         
         // Update bot statuses based on heartbeats
         const now = new Date()
-        const heartbeats = (data.signals || []).filter((s: Signal) => s.signal_type === 'Heartbeat')
+        const heartbeats = (data.signals || []).filter((s: Signal) => 
+          s.signal_type.toLowerCase() === 'heartbeat'
+        )
         
         setBots(prev => prev.map(bot => {
           const lastHb = heartbeats.find((h: Signal) => 
-            h.source_bot === bot.name || h.source_bot === bot.id + '-bot'
+            h.source_bot === bot.name || 
+            h.source_bot === bot.id || 
+            h.source_bot === bot.id + '-bot' ||
+            h.source_bot === 'coordinator' && bot.id === 'coordinator'
           )
           if (lastHb) {
             const hbTime = new Date(lastHb.created_at)
@@ -154,8 +159,10 @@ export default function Home() {
         // Add new signals to logs
         const newSignals = (data.signals || []).slice(0, 5)
         newSignals.forEach((sig: Signal) => {
-          const emoji = sig.signal_type === 'Heartbeat' ? '💓' : 
-                       sig.signal_type === 'RoundStarted' ? '🆕' : '📨'
+          const sigType = sig.signal_type.toLowerCase()
+          const emoji = sigType === 'heartbeat' ? '💓' : 
+                       sigType === 'round_started' ? '🆕' : 
+                       sigType === 'deploy_opportunity' ? '🎯' : '📨'
           const logMsg = `${emoji} [${sig.source_bot}] ${sig.signal_type}`
           setLogs(prev => {
             if (!prev.includes(logMsg)) {
