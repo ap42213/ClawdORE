@@ -1,12 +1,22 @@
+interface Strategy {
+  name: string
+  squares: number[]
+  weights: number[]
+  reasoning: string
+  confidence: number
+  expected_roi: number
+}
+
 interface StrategyPanelProps {
   recommendation: {
     squares: number[]
     weights: string[]
     confidence: number
   } | null
+  strategies?: Strategy[]
 }
 
-export default function StrategyPanel({ recommendation }: StrategyPanelProps) {
+export default function StrategyPanel({ recommendation, strategies }: StrategyPanelProps) {
   if (!recommendation) {
     return (
       <div className="bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700/50 h-full">
@@ -29,6 +39,14 @@ export default function StrategyPanel({ recommendation }: StrategyPanelProps) {
     : recommendation.confidence >= 30 
       ? 'bg-yellow-500' 
       : 'bg-red-500'
+
+  // Sort strategies by confidence
+  const sortedStrategies = strategies 
+    ? [...strategies].sort((a, b) => b.confidence - a.confidence)
+    : []
+
+  const medals = ['🥇', '🥈', '🥉', '📊']
+  const medalColors = ['text-yellow-400', 'text-gray-400', 'text-orange-400', 'text-gray-500']
 
   return (
     <div className="bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700/50 h-full">
@@ -75,25 +93,46 @@ export default function StrategyPanel({ recommendation }: StrategyPanelProps) {
         </div>
       </div>
 
-      {/* Strategy Info */}
+      {/* Strategy Info - Dynamic from database */}
       <div className="bg-slate-900/50 rounded-lg p-3">
         <h4 className="text-xs text-gray-500 uppercase tracking-wide mb-2">Active Strategies</h4>
-        <div className="space-y-1 text-xs">
-          <div className="flex items-center gap-2">
-            <span className="text-yellow-400">🥇</span>
-            <span className="text-gray-300">Contrarian Value</span>
-            <span className="text-gray-500 ml-auto">60%</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-gray-400">🥈</span>
-            <span className="text-gray-300">Momentum</span>
-            <span className="text-gray-500 ml-auto">50%</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-orange-400">🥉</span>
-            <span className="text-gray-300">Quadrant Analysis</span>
-            <span className="text-gray-500 ml-auto">45%</span>
-          </div>
+        <div className="space-y-2 text-xs">
+          {sortedStrategies.length > 0 ? (
+            sortedStrategies.slice(0, 4).map((strat, idx) => (
+              <div key={strat.name} className="flex items-start gap-2">
+                <span className={medalColors[idx] || 'text-gray-500'}>{medals[idx] || '•'}</span>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-300">{strat.name}</span>
+                    <span className={`font-bold ${strat.confidence >= 0.5 ? 'text-green-400' : strat.confidence >= 0.3 ? 'text-yellow-400' : 'text-gray-500'}`}>
+                      {(strat.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="text-gray-500 text-[10px] truncate" title={strat.reasoning}>
+                    {strat.reasoning}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-yellow-400">🥇</span>
+                <span className="text-gray-300">Contrarian Value</span>
+                <span className="text-gray-500 ml-auto">60%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400">🥈</span>
+                <span className="text-gray-300">Momentum</span>
+                <span className="text-gray-500 ml-auto">50%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-orange-400">🥉</span>
+                <span className="text-gray-300">Quadrant Analysis</span>
+                <span className="text-gray-500 ml-auto">45%</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

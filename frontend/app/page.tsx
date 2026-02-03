@@ -153,6 +153,15 @@ export default function Home() {
     confidence: number
   } | null>(() => getStoredValue(STORAGE_KEYS.RECOMMENDATION, null))
 
+  const [strategies, setStrategies] = useState<{
+    name: string
+    squares: number[]
+    weights: number[]
+    reasoning: string
+    confidence: number
+    expected_roi: number
+  }[]>([])
+
   const [signals, setSignals] = useState<Signal[]>([])
   const [mounted, setMounted] = useState(false)
 
@@ -295,6 +304,11 @@ export default function Home() {
             confidence: data.consensus_recommendation.confidence,
           })
         }
+
+        // Set current strategies from database
+        if (data.current_strategies && Array.isArray(data.current_strategies)) {
+          setStrategies(data.current_strategies)
+        }
       }
 
       // Fetch stats
@@ -359,7 +373,7 @@ export default function Home() {
 
           {/* Center: Strategy Panel */}
           <div className="lg:col-span-1">
-            <StrategyPanel recommendation={recommendation} />
+            <StrategyPanel recommendation={recommendation} strategies={strategies} />
           </div>
 
           {/* Right: Terminal Feed */}
