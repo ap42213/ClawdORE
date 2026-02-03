@@ -40,16 +40,20 @@ export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60,
   const minutes = Math.floor(displayTime / 60)
   const seconds = displayTime % 60
   
-  // Mining decision thresholds
-  const SIGN_DEADLINE = 10      // Must sign tx by this time
-  const DECISION_TIME = 10.5    // Analyze and decide by this time  
-  const PREPARE_TIME = 15       // Start preparing strategy
+  // Mining decision thresholds - push as close to 0 as possible
+  // Solana block time ~400ms, tx propagation ~500ms, signing ~100ms
+  // Realistically need ~1-2s buffer for safety
+  const TOO_LATE = 1.5        // High risk - may miss round
+  const SIGN_DEADLINE = 3     // Sign and submit NOW
+  const DECISION_TIME = 5     // Final decision window  
+  const PREPARE_TIME = 10     // Start analyzing
   
   // Progress percentage (inverted - fills as time passes)
   const progress = roundDuration > 0 ? ((roundDuration - displayTime) / roundDuration) * 100 : 0
   
   // Color based on mining decision windows
   const getColor = () => {
+    if (displayTime <= TOO_LATE) return 'text-gray-500'
     if (displayTime <= SIGN_DEADLINE) return 'text-red-400'
     if (displayTime <= DECISION_TIME) return 'text-orange-400'
     if (displayTime <= PREPARE_TIME) return 'text-yellow-400'
@@ -57,6 +61,7 @@ export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60,
   }
   
   const getBarColor = () => {
+    if (displayTime <= TOO_LATE) return 'bg-gray-600'
     if (displayTime <= SIGN_DEADLINE) return 'bg-red-500'
     if (displayTime <= DECISION_TIME) return 'bg-orange-500'
     if (displayTime <= PREPARE_TIME) return 'bg-yellow-500'
@@ -64,9 +69,10 @@ export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60,
   }
   
   const getMiningStatus = () => {
-    if (displayTime <= SIGN_DEADLINE && displayTime > 0) return { icon: '🚨', text: 'SIGN NOW', urgent: true }
+    if (displayTime <= TOO_LATE && displayTime > 0) return { icon: '💀', text: 'TOO LATE', urgent: true }
+    if (displayTime <= SIGN_DEADLINE) return { icon: '🚨', text: 'SIGN NOW', urgent: true }
     if (displayTime <= DECISION_TIME) return { icon: '⚡', text: 'DECIDE', urgent: true }
-    if (displayTime <= PREPARE_TIME) return { icon: '📊', text: 'PREPARE', urgent: false }
+    if (displayTime <= PREPARE_TIME) return { icon: '📊', text: 'ANALYZE', urgent: false }
     return null
   }
   
