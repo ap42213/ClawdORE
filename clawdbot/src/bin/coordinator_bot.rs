@@ -360,7 +360,7 @@ async fn main() {
                             timestamp: None,
                         };
                         strategy_engine.add_round(round_history.clone());
-                        ore_strategy_engine.record_round(&round_history.deployed, round_history.winning_square);
+                        ore_strategy.record_round(&round_history.deployed, round_history.winning_square);
                         info!("📚 Added round {} to strategy history (winning square: {})", 
                             last_round_id, winning_square);
                         
@@ -377,25 +377,35 @@ async fn main() {
                                 let num_squares = squares.len() as u8;
                                 
                                 // Record win in learning engine
+                                let competition_on_sq = if winning_sq_usize < 25 { completed.deployed[winning_sq_usize] } else { 0 };
+                                let winner_share = if competition_on_sq > 0 { (*deploy_amount as f64 / competition_on_sq as f64) as f32 } else { 1.0 };
                                 learning_engine.record_win(WinRecord {
                                     round_id: last_round_id,
-                                    address: address.clone(),
+                                    winner_address: address.clone(),
                                     winning_square,
                                     squares_bet: squares.clone(),
                                     amount_bet: *deploy_amount,
+                                    amount_won: if winning_sq_usize < 25 { total_deployed.saturating_sub(completed.deployed[winning_sq_usize]) * (*deploy_amount) / competition_on_sq.max(1) } else { 0 },
+                                    num_squares: num_squares,
+                                    total_round_sol: total_deployed,
+                                    num_deployers: previous_round_deploys.len() as u32,
+                                    is_motherlode: motherlode,
                                     is_full_ore,
-                                    motherlode,
-                                    timestamp: std::time::SystemTime::now()
+                                    ore_earned: if is_full_ore { 1.0 } else { 0.5 },
+                                    competition_on_square: competition_on_sq,
+                                    winner_share_pct: winner_share,
+                                    slot: 0,
+                                    timestamp: Some(std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .unwrap_or_default()
-                                        .as_secs() as i64,
+                                        .as_secs() as i64),
                                 });
                                 
-                                // Record in ore_strategy_engine
+                                // Record in ore_strategy
                                 let winnings = if winning_sq_usize < 25 {
                                     total_deployed.saturating_sub(completed.deployed[winning_sq_usize])
                                 } else { 0 };
-                                ore_strategy_engine.record_win(
+                                ore_strategy.record_win(
                                     address, 
                                     winnings * (*deploy_amount) / completed.deployed[winning_sq_usize].max(1),
                                     if is_full_ore { 1.0 } else { 0.5 },
@@ -405,12 +415,23 @@ async fn main() {
                                 // Record in database
                                 #[cfg(feature = "database")]
                                 if let Some(ref db) = db {
+                                    let squares_i32: Vec<i32> = squares.iter().map(|s| *s as i32).collect();
                                     db.record_win(
-                                        address,
                                         last_round_id as i64,
+                                        address,
                                         winning_square as i16,
                                         *deploy_amount as i64,
+                                        winnings * (*deploy_amount) / competition_on_sq.max(1) as i64,
+                                        &squares_i32,
+                                        num_squares as i16,
+                                        total_deployed as i64,
+                                        previous_round_deploys.len() as i32,
+                                        motherlode,
                                         is_full_ore,
+                                        if is_full_ore { 1.0 } else { 0.5 },
+                                        competition_on_sq as i64,
+                                        winner_share,
+                                        0_i64,
                                     ).await.ok();
                                 }
                             }

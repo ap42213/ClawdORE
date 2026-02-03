@@ -283,18 +283,23 @@ async fn main() {
                                     
                                     #[cfg(feature = "database")]
                                     if let Some(ref db) = db {
-                                        db.record_detailed_win(
-                                            &address,
+                                        let squares_i32: Vec<i32> = squares.iter().map(|s| *s as i32).collect();
+                                        db.record_win(
                                             last_round_id as i64,
+                                            &address,
                                             winning_square as i16,
-                                            num_squares as i16,
                                             *amount as i64,
                                             (competition_on_square as f64 * winner_share) as i64,
+                                            &squares_i32,
+                                            num_squares as i16,
                                             total_sol as i64,
                                             num_deployers as i32,
-                                            is_full_ore,
                                             motherlode,
+                                            is_full_ore,
                                             ore_earned as f32,
+                                            competition_on_square as i64,
+                                            winner_share,
+                                            0_i64,
                                         ).await.ok();
                                     }
                                 }
