@@ -2,56 +2,47 @@ import { Bot } from '../page'
 
 interface BotCardProps {
   bot: Bot
-  onStart: () => void
-  onStop: () => void
 }
 
-export default function BotCard({ bot, onStart, onStop }: BotCardProps) {
+export default function BotCard({ bot }: BotCardProps) {
   const statusColors = {
-    running: 'bg-green-500',
-    stopped: 'bg-red-500',
-    starting: 'bg-yellow-500',
+    online: 'bg-green-500',
+    offline: 'bg-red-500',
+    syncing: 'bg-yellow-500',
+  }
+
+  const statusGlow = {
+    online: 'shadow-green-500/50',
+    offline: 'shadow-red-500/30',
+    syncing: 'shadow-yellow-500/50',
   }
 
   return (
-    <div className="bot-card bg-slate-800 rounded-lg p-6 border border-slate-700">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-4xl">{bot.icon}</span>
-        <div className="flex items-center">
-          <span className={`status-indicator status-${bot.status}`} />
-          <span className="text-sm text-gray-400 capitalize">{bot.status}</span>
-        </div>
+    <div className={`bot-card bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700/50 hover:border-orange-500/50 transition-all duration-300`}>
+      {/* Status indicator */}
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-3xl">{bot.icon}</span>
+        <div className={`w-3 h-3 rounded-full ${statusColors[bot.status]} ${bot.status === 'online' ? 'animate-pulse' : ''} shadow-lg ${statusGlow[bot.status]}`} />
       </div>
 
-      {/* Content */}
-      <h3 className="text-xl font-semibold mb-2">{bot.name}</h3>
-      <p className="text-gray-400 text-sm mb-4">{bot.description}</p>
+      {/* Name */}
+      <h3 className="text-sm font-bold text-orange-400 tracking-wide mb-1">
+        {bot.displayName}
+      </h3>
+      
+      {/* Description */}
+      <p className="text-gray-500 text-xs leading-tight">
+        {bot.description}
+      </p>
 
-      {/* Actions */}
-      <div className="flex gap-2">
-        <button
-          onClick={onStart}
-          disabled={bot.status !== 'stopped'}
-          className={`flex-1 py-2 px-4 rounded font-medium transition ${
-            bot.status === 'stopped'
-              ? 'bg-green-600 hover:bg-green-700 text-white'
-              : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          Start
-        </button>
-        <button
-          onClick={onStop}
-          disabled={bot.status === 'stopped'}
-          className={`flex-1 py-2 px-4 rounded font-medium transition ${
-            bot.status !== 'stopped'
-              ? 'bg-red-600 hover:bg-red-700 text-white'
-              : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          Stop
-        </button>
+      {/* Status text */}
+      <div className="mt-3 pt-2 border-t border-slate-700/50">
+        <span className={`text-xs uppercase tracking-wider ${
+          bot.status === 'online' ? 'text-green-400' : 
+          bot.status === 'syncing' ? 'text-yellow-400' : 'text-gray-500'
+        }`}>
+          {bot.status}
+        </span>
       </div>
     </div>
   )

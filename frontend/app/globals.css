@@ -4,71 +4,92 @@
 
 :root {
   --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 15, 23, 42;
-  --background-end-rgb: 30, 41, 59;
+  --background-start-rgb: 2, 6, 23;
+  --background-end-rgb: 15, 23, 42;
 }
 
 body {
   color: rgb(var(--foreground-rgb));
   background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+      135deg,
+      rgb(var(--background-start-rgb)) 0%,
+      rgb(var(--background-end-rgb)) 50%,
+      rgb(var(--background-start-rgb)) 100%
+    );
+  min-height: 100vh;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(249, 115, 22, 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(249, 115, 22, 0.5);
 }
 
 .terminal {
-  font-family: 'Courier New', monospace;
-  background: #1e293b;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  background: rgba(15, 23, 42, 0.8);
   border-radius: 0.5rem;
-  padding: 1rem;
-  min-height: 200px;
-  max-height: 400px;
+  padding: 0.75rem;
+  min-height: 280px;
+  max-height: 350px;
   overflow-y: auto;
 }
 
 .terminal-line {
-  margin: 0.25rem 0;
-  font-size: 0.875rem;
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
 }
 
 .bot-card {
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
 }
 
 .bot-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4), 0 0 40px rgba(249, 115, 22, 0.1);
 }
 
-.status-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 0.5rem;
+/* Glow effects */
+.glow-orange {
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.3);
 }
 
-.status-running {
-  background-color: #10b981;
-  animation: pulse 2s infinite;
+.glow-green {
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
 }
 
-.status-stopped {
-  background-color: #ef4444;
+/* Grid pattern background */
+.grid-pattern {
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
-.status-starting {
-  background-color: #f59e0b;
-  animation: pulse 1s infinite;
-}
-
-@keyframes pulse {
+/* Animations */
+@keyframes pulse-glow {
   0%, 100% {
-    opacity: 1;
+    box-shadow: 0 0 5px currentColor;
   }
   50% {
-    opacity: 0.5;
+    box-shadow: 0 0 20px currentColor;
   }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
 }
