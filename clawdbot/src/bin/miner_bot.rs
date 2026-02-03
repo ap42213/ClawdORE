@@ -9,7 +9,12 @@ use clawdbot::{
 };
 use colored::*;
 use log::{error, info, warn};
-use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
+use solana_client::rpc_client::RpcClient;
+use solana_sdk::{
+    commitment_config::CommitmentConfig,
+    signature::{read_keypair_file, Keypair, Signer},
+    transaction::Transaction,
+};
 use std::sync::{Arc, RwLock};
 use tokio::time::{sleep, Duration};
 
@@ -27,6 +32,11 @@ use clawdbot::db::SharedDb;
 const MIN_WALLET_SOL: f64 = 0.05;
 const MAX_BET_PER_ROUND_SOL: f64 = 0.04;
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
+
+/// Timing thresholds for mining decisions (in seconds)
+const DECISION_TIME: f64 = 5.0;   // Analyze and decide by this time
+const SIGN_DEADLINE: f64 = 3.0;   // Must sign and submit by this time  
+const TOO_LATE: f64 = 1.5;        // Past this point, skip the round
 
 /// Load keypair from file path or from environment variable
 fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
@@ -203,6 +213,72 @@ impl SmartMinerBot {
         client.get_balance()
     }
 
+    /// Execute a deploy transaction on-chain
+    /// Returns the transaction signature on success
+    async fn execute_deploy(&self, decision: &DeployDecision, round_id: u64) -> Result<String> {
+        info!("{}", "⚡ EXECUTING DEPLOY TRANSACTION...".green().bold());
+        
+        // Convert squares Vec to [bool; 25] array
+        let mut squares_arr = [false; 25];
+        for &sq in &decision.squares {
+            if sq < 25 {
+                squares_arr[sq] = true;
+            }
+        }
+        
+        // Build the deploy instruction using ore_api
+        let ix = ore_api::sdk::deploy(
+            self.keypair.pubkey(),  // signer
+            self.keypair.pubkey(),  // authority (same for manual deploy)
+            decision.total_amount_lamports,
+            round_id,
+            squares_arr,
+        );
+        
+        // Create RPC client
+        let rpc_client = RpcClient::new_with_commitment(
+            self.rpc_url.clone(),
+            CommitmentConfig::confirmed(),
+        );
+        
+        // Get recent blockhash
+        let blockhash = rpc_client.get_latest_blockhash()
+            .map_err(|e| clawdbot::error::BotError::RpcTimeout(format!("Failed to get blockhash: {}", e)))?;
+        
+        // Create and sign transaction
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.keypair.pubkey()),
+            &[&self.keypair],
+            blockhash,
+        );
+        
+        // Send and confirm
+        info!("   📤 Sending transaction...");
+        let signature = rpc_client.send_and_confirm_transaction(&tx)
+            .map_err(|e| clawdbot::error::BotError::RpcTimeout(format!("Transaction failed: {}", e)))?;
+        
+        info!("{}", format!("   ✅ Transaction confirmed: {}", signature).green());
+        
+        Ok(signature.to_string())
+    }
+
+    /// Calculate time remaining in current round
+    fn get_time_remaining(&self, board: &ore_api::state::Board) -> f64 {
+        let current_slot = match self.parser.get_slot() {
+            Ok(s) => s,
+            Err(_) => return 60.0, // Default to full round on error
+        };
+        
+        if current_slot >= board.end_slot {
+            return 0.0;
+        }
+        
+        let slots_remaining = board.end_slot.saturating_sub(current_slot);
+        // ~400ms per slot = 2.5 slots per second
+        slots_remaining as f64 / 2.5
+    }
+
     /// Main mining loop
     async fn mining_loop(&mut self) -> Result<()> {
         info!("⛏️  Smart Miner started!");
@@ -263,12 +339,14 @@ impl SmartMinerBot {
             let num_deployers = round.deployed.iter().filter(|&&d| d > 0).count() as u32;
 
             // Display status
+            let time_remaining = self.get_time_remaining(&board);
             info!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
             info!("💰 Balance: {:.4} SOL | Est. rounds: {}", balance_sol, rounds_remaining);
             info!("📊 Round {} | Deployed: {:.4} SOL | Competition: {:?}", 
                 current_round_id,
                 total_deployed as f64 / LAMPORTS_PER_SOL as f64,
                 competition);
+            info!("⏱️  Time remaining: {:.1}s", time_remaining);
             
             // Get consensus recommendation from coordinator (via database)
             let mut consensus_squares: Vec<usize> = Vec::new();
@@ -306,17 +384,73 @@ impl SmartMinerBot {
                 info!("   Expected ORE: {:.2}", decision.expected_ore);
                 info!("   Reasoning: {}", decision.reasoning);
                 
-                if self.mode == "live" {
-                    // TODO: Execute actual deploy transaction
-                    info!("⚡ EXECUTING DEPLOY TRANSACTION...");
-                    // self.execute_deploy(&decision).await?;
-                    warn!("   ⚠️ Transaction execution not yet implemented");
-                } else {
-                    info!("   📋 SIMULATION MODE - no transaction sent");
-                }
+                // Timing-aware execution
+                let time_remaining = self.get_time_remaining(&board);
                 
-                self.rounds_played += 1;
-                self.total_deployed += decision.total_amount_lamports;
+                if time_remaining <= TOO_LATE {
+                    // Too late - skip this round
+                    warn!("   💀 TOO LATE ({:.1}s remaining) - waiting for next round", time_remaining);
+                } else if time_remaining <= SIGN_DEADLINE {
+                    // In the signing window - execute immediately!
+                    if self.mode == "live" {
+                        match self.execute_deploy(&decision, current_round_id).await {
+                            Ok(sig) => {
+                                info!("   🎉 Deploy successful! Signature: {}", sig);
+                                self.rounds_played += 1;
+                                self.total_deployed += decision.total_amount_lamports;
+                                
+                                // Log to database
+                                #[cfg(feature = "database")]
+                                if is_database_available() {
+                                    if let Ok(db) = SharedDb::connect().await {
+                                        db.set_state("last_deploy", serde_json::json!({
+                                            "round_id": current_round_id,
+                                            "squares": decision.squares,
+                                            "amount_lamports": decision.total_amount_lamports,
+                                            "signature": sig,
+                                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                                        })).await.ok();
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("   ❌ Deploy failed: {}", e);
+                            }
+                        }
+                    } else {
+                        info!("   📋 SIMULATION MODE - would execute at {:.1}s", time_remaining);
+                        self.rounds_played += 1;
+                        self.total_deployed += decision.total_amount_lamports;
+                    }
+                } else if time_remaining <= DECISION_TIME {
+                    // In decision window - wait a bit more for better intel
+                    let wait_time = (time_remaining - SIGN_DEADLINE).max(0.1);
+                    info!("   ⏳ Waiting {:.1}s for optimal timing...", wait_time);
+                    sleep(Duration::from_secs_f64(wait_time)).await;
+                    
+                    // Now execute
+                    if self.mode == "live" {
+                        match self.execute_deploy(&decision, current_round_id).await {
+                            Ok(sig) => {
+                                info!("   🎉 Deploy successful! Signature: {}", sig);
+                                self.rounds_played += 1;
+                                self.total_deployed += decision.total_amount_lamports;
+                            }
+                            Err(e) => {
+                                error!("   ❌ Deploy failed: {}", e);
+                            }
+                        }
+                    } else {
+                        info!("   📋 SIMULATION MODE - no transaction sent");
+                        self.rounds_played += 1;
+                        self.total_deployed += decision.total_amount_lamports;
+                    }
+                } else {
+                    // Too early - wait for decision window
+                    let wait_time = (time_remaining - DECISION_TIME).max(0.1);
+                    info!("   ⏳ Too early ({:.1}s remaining) - waiting {:.1}s for decision window...", 
+                        time_remaining, wait_time);
+                }
                 
             } else {
                 info!("{}", format!("⏸️  SKIP THIS ROUND").yellow());

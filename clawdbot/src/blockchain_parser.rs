@@ -674,6 +674,11 @@ impl BlockchainParser {
         }
     }
 
+    /// Get current slot
+    pub fn get_slot(&self) -> Result<u64> {
+        Ok(self.rpc_client.get_slot()?)
+    }
+
     /// Get current board state
     pub fn get_board(&self) -> Result<Board> {
         let (board_address, _) = ore_api::state::board_pda();
