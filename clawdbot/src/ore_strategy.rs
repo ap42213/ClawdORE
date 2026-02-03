@@ -315,7 +315,7 @@ impl OreStrategyEngine {
     /// Uses PURE learning - no preset defaults, explores when no data
     pub fn get_optimal_square_count(&self) -> (u8, f64, String) {
         let mut best_count = 0u8;
-        let mut best_score = 0.0f64;
+        let mut best_ev = f64::NEG_INFINITY;
         let mut reasoning = String::new();
 
         // Find which counts have enough data AND wins (minimum 5 samples to start learning)
@@ -334,75 +334,87 @@ impl OreStrategyEngine {
             }
         }
         
-        // If no counts have wins yet, use theoretical best (more squares = better odds)
+        // Calculate EV for each square count (1-25)
+        // EV = (win_probability * expected_reward) - cost
+        // With no data, use theoretical probabilities
         if counts_with_wins == 0 {
-            // Use a balanced exploration: 5-7 squares is a good starting point
-            // More squares = higher win probability but lower ORE per square
-            let theoretical_best: u8 = {
-                use std::time::{SystemTime, UNIX_EPOCH};
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                // Vary between 4-8 squares while exploring
-                ((now % 5) + 4) as u8
-            };
+            // Use pure EV calculation - can pick ANY count from 1-25
+            // Win probability = count/25, Reward scales with 1/sqrt(count), Cost = count
+            for count in 1..=25u8 {
+                let win_prob = count as f64 / 25.0;
+                // Assume 1 ORE reward, shared proportionally if multiple winners
+                // More squares = better odds but smaller share
+                let expected_ore = 1.0 / (count as f64).sqrt();
+                let cost = count as f64 * 0.001; // ~0.001 SOL per square
+                
+                let ev = (win_prob * expected_ore) - cost;
+                
+                if ev > best_ev {
+                    best_ev = ev;
+                    best_count = count;
+                }
+            }
             
-            return (theoretical_best, 0.0, format!(
-                "EXPLORING: No wins recorded yet. Trying {} squares (more squares = better odds)",
-                theoretical_best
+            return (best_count, best_ev, format!(
+                "EV-OPTIMAL: {} squares (EV={:.4}) - higher count = better odds, exploring full range 1-25",
+                best_count, best_ev
             ));
         }
         
-        // Score each square count by: win_rate * ore_efficiency - cost
-        // Only consider counts with actual wins for scoring
+        // Score each square count by EV using learned data
+        // Can pick ANY count from 1-25 if EV is positive
         for count in 1..=25u8 {
             let stats = &self.square_count_performance[count as usize];
-            if stats.times_used < min_samples as u32 {
-                continue; // Not enough data
-            }
             
-            // Skip counts with 0 wins - they haven't proven themselves
-            if stats.times_won == 0 {
-                continue;
-            }
+            // Use actual data if available, otherwise theoretical
+            let win_prob = if stats.times_used >= min_samples as u32 && stats.times_won > 0 {
+                stats.win_rate as f64
+            } else if stats.times_used >= min_samples as u32 {
+                // Tried but no wins - use lower estimate
+                0.5 * (count as f64 / 25.0)
+            } else {
+                // No data - use theoretical
+                count as f64 / 25.0
+            };
+            
+            // Expected ORE when winning (from actual data if available)
+            let expected_ore = if stats.times_won > 0 && stats.avg_ore_earned > 0.0 {
+                stats.avg_ore_earned as f64
+            } else {
+                1.0 / (count as f64).sqrt() // Theoretical
+            };
+            
+            let cost = count as f64 * 0.001; // SOL cost
+            let ev = (win_prob * expected_ore) - cost;
 
-            // Win probability increases with more squares
-            let base_win_prob = count as f64 / 25.0;
-            
-            // But cost increases linearly
-            let cost_factor = count as f64;
-            
-            // ORE efficiency (more squares = smaller share when winning)
-            let ore_efficiency = 1.0 / (count as f64).sqrt();
-            
-            // Actual win rate from data (this is > 0 since we skip 0-win counts)
-            let actual_win_rate = stats.win_rate;
-            
-            // Combined score: actual performance weighted by efficiency
-            let score = (actual_win_rate * 2.0 + base_win_prob) * ore_efficiency / cost_factor;
-
-            if score > best_score {
-                best_score = score;
+            if ev > best_ev {
+                best_ev = ev;
                 best_count = count;
-                reasoning = format!(
-                    "LEARNED: {} squares = {:.1}% win rate ({} wins), {:.2} efficiency, {} samples",
-                    count, actual_win_rate * 100.0, stats.times_won, ore_efficiency, stats.times_used
-                );
+                if stats.times_won > 0 {
+                    reasoning = format!(
+                        "LEARNED: {} squares, EV={:.4}, {:.1}% win rate ({} wins), {:.3} avg ORE",
+                        count, ev, stats.win_rate * 100.0, stats.times_won, stats.avg_ore_earned
+                    );
+                } else {
+                    reasoning = format!(
+                        "EV-OPTIMAL: {} squares (EV={:.4}), theoretical estimate",
+                        count, ev
+                    );
+                }
             }
         }
 
-        // If somehow no count with wins was found (shouldn't happen), explore
-        if best_count == 0 {
+        // If somehow no positive EV found, pick based on exploration
+        if best_count == 0 || best_ev <= 0.0 {
             best_count = self.pick_exploration_count();
-            best_score = 0.0;
+            best_ev = 0.0;
             reasoning = format!(
-                "EXPLORING: Trying {} squares to gather data ({}+ samples needed per count)",
-                best_count, min_samples
+                "EXPLORING: {} squares - gathering data across 1-25 range",
+                best_count
             );
         }
 
-        (best_count, best_score, reasoning)
+        (best_count, best_ev, reasoning)
     }
     
     /// Pick a square count to explore (one we have less data on)
