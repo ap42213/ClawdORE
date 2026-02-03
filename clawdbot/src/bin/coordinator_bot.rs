@@ -425,6 +425,47 @@ async fn main() {
                             }
                         };
                         
+                        // *** CRITICAL: Update rounds table with winning square ***
+                        #[cfg(feature = "database")]
+                        if let Some(ref db) = db {
+                            if winning_square > 0 || winning_result.is_ok() {
+                                if let Err(e) = db.complete_round(
+                                    last_round_id as i64,
+                                    winning_square as i16,
+                                    motherlode
+                                ).await {
+                                    warn!("Failed to update round {} with winning square: {}", last_round_id, e);
+                                } else {
+                                    info!("✅ Updated rounds table: round {} winning_square = {}", 
+                                        last_round_id, winning_square);
+                                }
+                                
+                                // Also record strategy performance for consensus
+                                if let Ok(state) = db.get_state("consensus_recommendation").await {
+                                    if let Some(rec) = state {
+                                        if let Some(squares) = rec["squares"].as_array() {
+                                            let our_picks: Vec<i32> = squares.iter()
+                                                .filter_map(|s| s.as_i64().map(|n| n as i32))
+                                                .collect();
+                                            let hit = our_picks.contains(&(winning_square as i32));
+                                            let confidence = rec["confidence"].as_f64().unwrap_or(0.5) as f32;
+                                            
+                                            db.record_strategy_performance(
+                                                "consensus",
+                                                last_round_id as i64,
+                                                &our_picks,
+                                                winning_square as i16,
+                                                confidence
+                                            ).await.ok();
+                                            
+                                            info!("📊 Recorded consensus performance: picks={:?}, winner={}, hit={}",
+                                                our_picks, winning_square, hit);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
                         let round_history = RoundHistory {
                             round_id: last_round_id,
                             winning_square,

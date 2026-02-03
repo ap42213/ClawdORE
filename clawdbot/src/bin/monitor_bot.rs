@@ -158,6 +158,20 @@ async fn main() {
                     if let Ok(Some((winning_square, motherlode))) = parser.get_round_result(last_round_id) {
                         info!("🎯 Round {} RESULT: Winning square {} {}", 
                             last_round_id, winning_square, if motherlode { "🎰 MOTHERLODE!" } else { "" });
+                        
+                        // Update database with winning square
+                        #[cfg(feature = "database")]
+                        if let Some(ref db) = db {
+                            if let Err(e) = db.complete_round(
+                                last_round_id as i64,
+                                winning_square as i16,
+                                motherlode
+                            ).await {
+                                warn!("Failed to update round with winning square: {}", e);
+                            } else {
+                                info!("✅ Updated round {} with winning_square = {}", last_round_id, winning_square);
+                            }
+                        }
                     }
                     
                     #[cfg(feature = "database")]
