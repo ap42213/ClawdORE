@@ -83,3 +83,7 @@ path = "src/bin/coordinator_bot.rs"
 [[bin]]
 name = "learning-bot"
 path = "src/bin/learning_bot.rs"
+
+[[bin]]
+name = "setup-automation"
+path = "src/bin/setup_automation.rs"

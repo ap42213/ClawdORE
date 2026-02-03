@@ -12,6 +12,7 @@ use log::{error, info, warn};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
     transaction::Transaction,
 };
@@ -33,10 +34,16 @@ const MIN_WALLET_SOL: f64 = 0.05;
 const MAX_BET_PER_ROUND_SOL: f64 = 0.04;
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
-/// Timing thresholds for mining decisions (in seconds)
-const DECISION_TIME: f64 = 5.0;   // Analyze and decide by this time
-const SIGN_DEADLINE: f64 = 3.0;   // Must sign and submit by this time  
-const TOO_LATE: f64 = 1.5;        // Past this point, skip the round
+/// Timing thresholds for MANUAL mode (slower, we sign ourselves)
+const MANUAL_DECISION_TIME: f64 = 5.0;
+const MANUAL_SIGN_DEADLINE: f64 = 3.0;
+const MANUAL_TOO_LATE: f64 = 1.5;
+
+/// Timing thresholds for EXECUTOR mode (fast, automation pre-funded)
+/// We can push much closer to 0 since we sign instantly
+const EXECUTOR_DECISION_TIME: f64 = 2.0;   // Start analyzing
+const EXECUTOR_SIGN_DEADLINE: f64 = 0.8;   // Execute here - max intel, still safe
+const EXECUTOR_TOO_LATE: f64 = 0.4;        // ~1 slot, too risky
 
 /// Load keypair from file path or from environment variable
 fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
@@ -65,6 +72,10 @@ fn load_keypair(keypair_path: &str) -> std::result::Result<Keypair, String> {
 /// 2. When to play (competition level)
 /// 3. Which squares to pick
 /// 4. Budget per round
+///
+/// Supports two execution modes:
+/// - Manual: Signs deploys directly (slower, 3-5s buffer needed)
+/// - Executor: Triggers automation deploys (fast, 0.5-1s buffer)
 struct SmartMinerBot {
     name: String,
     status: Arc<RwLock<BotStatus>>,
@@ -72,7 +83,8 @@ struct SmartMinerBot {
     parser: BlockchainParser,
     keypair: Keypair,
     rpc_url: String,
-    mode: String, // "simulation" or "live"
+    mode: String,           // "simulation", "live", or "executor"
+    authority: Option<Pubkey>,  // For executor mode: whose automation to trigger
     
     // Tracking
     rounds_played: u32,
@@ -87,6 +99,7 @@ impl SmartMinerBot {
         rpc_url: String, 
         keypair: Keypair, 
         mode: String,
+        authority: Option<Pubkey>,
     ) -> Result<Self> {
         let parser = BlockchainParser::new(&rpc_url)?;
         
@@ -102,12 +115,22 @@ impl SmartMinerBot {
             keypair,
             rpc_url,
             mode,
+            authority,
             rounds_played: 0,
             rounds_won: 0,
             total_deployed: 0,
             total_won: 0,
             ore_earned: 0.0,
         })
+    }
+    
+    /// Get timing thresholds based on mode
+    fn get_timing(&self) -> (f64, f64, f64) {
+        if self.mode == "executor" {
+            (EXECUTOR_DECISION_TIME, EXECUTOR_SIGN_DEADLINE, EXECUTOR_TOO_LATE)
+        } else {
+            (MANUAL_DECISION_TIME, MANUAL_SIGN_DEADLINE, MANUAL_TOO_LATE)
+        }
     }
 
     /// Load learned strategies from database
@@ -213,10 +236,10 @@ impl SmartMinerBot {
         client.get_balance()
     }
 
-    /// Execute a deploy transaction on-chain
+    /// Execute a deploy transaction on-chain (MANUAL mode)
     /// Returns the transaction signature on success
     async fn execute_deploy(&self, decision: &DeployDecision, round_id: u64) -> Result<String> {
-        info!("{}", "⚡ EXECUTING DEPLOY TRANSACTION...".green().bold());
+        info!("{}", "⚡ EXECUTING MANUAL DEPLOY...".green().bold());
         
         // Convert squares Vec to [bool; 25] array
         let mut squares_arr = [false; 25];
@@ -259,6 +282,64 @@ impl SmartMinerBot {
             .map_err(|e| clawdbot::error::BotError::RpcTimeout(format!("Transaction failed: {}", e)))?;
         
         info!("{}", format!("   ✅ Transaction confirmed: {}", signature).green());
+        
+        Ok(signature.to_string())
+    }
+
+    /// Execute a deploy via automation account (EXECUTOR mode)
+    /// This is FAST - we sign with our keypair, SOL comes from pre-funded automation
+    async fn execute_executor_deploy(&self, decision: &DeployDecision, round_id: u64) -> Result<String> {
+        let authority = self.authority.ok_or_else(|| {
+            clawdbot::error::BotError::Config("Executor mode requires AUTHORITY_PUBKEY".into())
+        })?;
+        
+        info!("{}", "⚡ EXECUTOR DEPLOY (FAST MODE)...".yellow().bold());
+        info!("   Authority: {}", authority);
+        info!("   Squares: {:?}", decision.squares);
+        
+        // Convert squares Vec to [bool; 25] array
+        let mut squares_arr = [false; 25];
+        for &sq in &decision.squares {
+            if sq < 25 {
+                squares_arr[sq] = true;
+            }
+        }
+        
+        // Build the deploy instruction - WE are signer, AUTHORITY owns the automation
+        // In Discretionary mode, we (executor) choose the squares via the mask
+        let ix = ore_api::sdk::deploy(
+            self.keypair.pubkey(),  // signer (executor - US)
+            authority,              // authority (whose automation account)
+            decision.total_amount_lamports,
+            round_id,
+            squares_arr,
+        );
+        
+        // Create RPC client with confirmed commitment for speed
+        let rpc_client = RpcClient::new_with_commitment(
+            self.rpc_url.clone(),
+            CommitmentConfig::confirmed(),
+        );
+        
+        // Get recent blockhash
+        let blockhash = rpc_client.get_latest_blockhash()
+            .map_err(|e| clawdbot::error::BotError::RpcTimeout(format!("Failed to get blockhash: {}", e)))?;
+        
+        // Create and sign transaction - WE sign, not the authority!
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.keypair.pubkey()),
+            &[&self.keypair],
+            blockhash,
+        );
+        
+        // Send transaction (don't wait for full confirmation for speed)
+        info!("   📤 Sending executor transaction...");
+        let signature = rpc_client.send_transaction(&tx)
+            .map_err(|e| clawdbot::error::BotError::RpcTimeout(format!("Transaction failed: {}", e)))?;
+        
+        info!("{}", format!("   ✅ Transaction sent: {}", signature).green());
+        info!("   ⏱️  Deployed at ~{:.2}s before round end", self.get_time_remaining(&self.parser.get_board()?));
         
         Ok(signature.to_string())
     }
@@ -384,70 +465,89 @@ impl SmartMinerBot {
                 info!("   Expected ORE: {:.2}", decision.expected_ore);
                 info!("   Reasoning: {}", decision.reasoning);
                 
-                // Timing-aware execution
+                // Get timing thresholds based on mode
+                let (decision_time, sign_deadline, too_late) = self.get_timing();
                 let time_remaining = self.get_time_remaining(&board);
                 
-                if time_remaining <= TOO_LATE {
+                info!("   Mode: {} | Timing: decide@{:.1}s, sign@{:.1}s, late@{:.1}s", 
+                    self.mode, decision_time, sign_deadline, too_late);
+                
+                if time_remaining <= too_late {
                     // Too late - skip this round
                     warn!("   💀 TOO LATE ({:.1}s remaining) - waiting for next round", time_remaining);
-                } else if time_remaining <= SIGN_DEADLINE {
+                } else if time_remaining <= sign_deadline {
                     // In the signing window - execute immediately!
-                    if self.mode == "live" {
-                        match self.execute_deploy(&decision, current_round_id).await {
-                            Ok(sig) => {
-                                info!("   🎉 Deploy successful! Signature: {}", sig);
-                                self.rounds_played += 1;
-                                self.total_deployed += decision.total_amount_lamports;
-                                
-                                // Log to database
-                                #[cfg(feature = "database")]
-                                if is_database_available() {
-                                    if let Ok(db) = SharedDb::connect().await {
-                                        db.set_state("last_deploy", serde_json::json!({
-                                            "round_id": current_round_id,
-                                            "squares": decision.squares,
-                                            "amount_lamports": decision.total_amount_lamports,
-                                            "signature": sig,
-                                            "timestamp": chrono::Utc::now().to_rfc3339(),
-                                        })).await.ok();
-                                    }
+                    let result = match self.mode.as_str() {
+                        "executor" => self.execute_executor_deploy(&decision, current_round_id).await,
+                        "live" => self.execute_deploy(&decision, current_round_id).await,
+                        _ => {
+                            info!("   📋 SIMULATION MODE - would execute at {:.1}s", time_remaining);
+                            self.rounds_played += 1;
+                            self.total_deployed += decision.total_amount_lamports;
+                            Ok("simulation".to_string())
+                        }
+                    };
+                    
+                    match result {
+                        Ok(sig) if sig != "simulation" => {
+                            info!("   🎉 Deploy successful! Signature: {}", sig);
+                            self.rounds_played += 1;
+                            self.total_deployed += decision.total_amount_lamports;
+                            
+                            // Log to database
+                            #[cfg(feature = "database")]
+                            if is_database_available() {
+                                if let Ok(db) = SharedDb::connect().await {
+                                    db.set_state("last_deploy", serde_json::json!({
+                                        "round_id": current_round_id,
+                                        "squares": decision.squares,
+                                        "amount_lamports": decision.total_amount_lamports,
+                                        "signature": sig,
+                                        "mode": self.mode,
+                                        "time_remaining": time_remaining,
+                                        "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    })).await.ok();
                                 }
                             }
-                            Err(e) => {
-                                error!("   ❌ Deploy failed: {}", e);
-                            }
                         }
-                    } else {
-                        info!("   📋 SIMULATION MODE - would execute at {:.1}s", time_remaining);
-                        self.rounds_played += 1;
-                        self.total_deployed += decision.total_amount_lamports;
+                        Err(e) => {
+                            error!("   ❌ Deploy failed: {}", e);
+                        }
+                        _ => {}
                     }
-                } else if time_remaining <= DECISION_TIME {
-                    // In decision window - wait a bit more for better intel
-                    let wait_time = (time_remaining - SIGN_DEADLINE).max(0.1);
-                    info!("   ⏳ Waiting {:.1}s for optimal timing...", wait_time);
+                } else if time_remaining <= decision_time {
+                    // In decision window - wait for optimal timing
+                    let wait_time = (time_remaining - sign_deadline).max(0.1);
+                    info!("   ⏳ Waiting {:.1}s for optimal timing ({:.1}s target)...", 
+                        wait_time, sign_deadline);
                     sleep(Duration::from_secs_f64(wait_time)).await;
                     
                     // Now execute
-                    if self.mode == "live" {
-                        match self.execute_deploy(&decision, current_round_id).await {
-                            Ok(sig) => {
-                                info!("   🎉 Deploy successful! Signature: {}", sig);
-                                self.rounds_played += 1;
-                                self.total_deployed += decision.total_amount_lamports;
-                            }
-                            Err(e) => {
-                                error!("   ❌ Deploy failed: {}", e);
-                            }
+                    let result = match self.mode.as_str() {
+                        "executor" => self.execute_executor_deploy(&decision, current_round_id).await,
+                        "live" => self.execute_deploy(&decision, current_round_id).await,
+                        _ => {
+                            info!("   📋 SIMULATION MODE - no transaction sent");
+                            self.rounds_played += 1;
+                            self.total_deployed += decision.total_amount_lamports;
+                            Ok("simulation".to_string())
                         }
-                    } else {
-                        info!("   📋 SIMULATION MODE - no transaction sent");
-                        self.rounds_played += 1;
-                        self.total_deployed += decision.total_amount_lamports;
+                    };
+                    
+                    match result {
+                        Ok(sig) if sig != "simulation" => {
+                            info!("   🎉 Deploy successful! Signature: {}", sig);
+                            self.rounds_played += 1;
+                            self.total_deployed += decision.total_amount_lamports;
+                        }
+                        Err(e) => {
+                            error!("   ❌ Deploy failed: {}", e);
+                        }
+                        _ => {}
                     }
                 } else {
                     // Too early - wait for decision window
-                    let wait_time = (time_remaining - DECISION_TIME).max(0.1);
+                    let wait_time = (time_remaining - decision_time).max(0.1);
                     info!("   ⏳ Too early ({:.1}s remaining) - waiting {:.1}s for decision window...", 
                         time_remaining, wait_time);
                 }
@@ -568,17 +668,36 @@ async fn main() {
     info!("🔑 Wallet: {}", keypair.pubkey());
     info!("═══════════════════════════════════════════════════════════════");
 
-    // Get mode
+    // Get mode and authority (for executor mode)
     let mode = config.mode.clone();
-    if mode != "live" {
-        warn!("{}", "⚠️ SIMULATION MODE - transactions will NOT be sent!".yellow());
-        warn!("   Set BOT_MODE=live to enable real transactions");
-    } else {
-        info!("{}", "🟢 LIVE MODE - real transactions enabled!".green().bold());
+    let authority: Option<Pubkey> = std::env::var("AUTHORITY_PUBKEY")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    
+    match mode.as_str() {
+        "executor" => {
+            if let Some(auth) = &authority {
+                info!("{}", "🚀 EXECUTOR MODE - fast automation deploys!".yellow().bold());
+                info!("   Authority: {}", auth);
+                info!("   Timing: deploy at ~0.8s before round end");
+            } else {
+                error!("❌ EXECUTOR mode requires AUTHORITY_PUBKEY environment variable");
+                error!("   This is the pubkey of the wallet that created the automation account");
+                return;
+            }
+        }
+        "live" => {
+            info!("{}", "🟢 LIVE MODE - manual deploys (slower timing)".green().bold());
+            info!("   Timing: deploy at ~3s before round end");
+        }
+        _ => {
+            warn!("{}", "⚠️ SIMULATION MODE - no transactions will be sent".yellow());
+            warn!("   Set BOT_MODE=live or BOT_MODE=executor to enable");
+        }
     }
 
     // Create bot
-    let mut bot = match SmartMinerBot::new(config.rpc_url.clone(), keypair, mode).await {
+    let mut bot = match SmartMinerBot::new(config.rpc_url.clone(), keypair, mode, authority).await {
         Ok(b) => b,
         Err(e) => {
             error!("Failed to create bot: {}", e);
