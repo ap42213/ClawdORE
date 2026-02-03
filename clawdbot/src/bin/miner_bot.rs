@@ -356,8 +356,8 @@ impl SmartMinerBot {
         }
         
         let slots_remaining = board.end_slot.saturating_sub(current_slot);
-        // ~400ms per slot = 2.5 slots per second
-        slots_remaining as f64 / 2.5
+        // Solana targets ~400ms/slot but often runs faster (~350-380ms)
+        slots_remaining as f64 / 2.7
     }
 
     /// Main mining loop

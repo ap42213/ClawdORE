@@ -490,12 +490,10 @@ async fn main() {
                         }
                         
                         // Update monitor_status with timing info for frontend
-                        let slots_per_second: f64 = 2.5; // ~400ms per slot
+                        // Use actual block times for accurate countdown
+                        let (time_remaining_secs, round_duration_secs) = parser.get_round_timing(&board);
                         let current_slot = parser.get_slot().unwrap_or(board.start_slot);
-                        let round_duration_slots = board.end_slot.saturating_sub(board.start_slot);
-                        let round_duration_secs = (round_duration_slots as f64 / slots_per_second) as u64;
                         let slots_remaining = board.end_slot.saturating_sub(current_slot);
-                        let time_remaining_secs = (slots_remaining as f64 / slots_per_second) as u64;
                         
                         db.set_state("monitor_status", serde_json::json!({
                             "round_id": current_round,

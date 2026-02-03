@@ -678,6 +678,42 @@ impl BlockchainParser {
     pub fn get_slot(&self) -> Result<u64> {
         Ok(self.rpc_client.get_slot()?)
     }
+    
+    /// Get block time for a slot (Unix timestamp in seconds)
+    pub fn get_block_time(&self, slot: u64) -> Option<i64> {
+        self.rpc_client.get_block_time(slot).ok()
+    }
+    
+    /// Calculate actual time remaining in seconds using real block times
+    /// Returns (time_remaining_secs, round_duration_secs) or estimates if block times unavailable
+    pub fn get_round_timing(&self, board: &Board) -> (u64, u64) {
+        let current_slot = self.get_slot().unwrap_or(board.start_slot);
+        let slots_remaining = board.end_slot.saturating_sub(current_slot);
+        let total_slots = board.end_slot.saturating_sub(board.start_slot);
+        
+        // Try to get actual block times for accurate calculation
+        if let (Some(start_time), Some(current_time)) = (
+            self.get_block_time(board.start_slot),
+            self.get_block_time(current_slot)
+        ) {
+            let elapsed_secs = (current_time - start_time).max(0) as u64;
+            let slots_elapsed = current_slot.saturating_sub(board.start_slot);
+            
+            if slots_elapsed > 0 {
+                // Calculate actual ms per slot from observed data
+                let ms_per_slot = (elapsed_secs as f64 * 1000.0) / slots_elapsed as f64;
+                let time_remaining = (slots_remaining as f64 * ms_per_slot / 1000.0) as u64;
+                let round_duration = (total_slots as f64 * ms_per_slot / 1000.0) as u64;
+                return (time_remaining, round_duration);
+            }
+        }
+        
+        // Fallback: estimate using ~370ms per slot (2.7 slots/sec)
+        let slots_per_second = 2.7;
+        let time_remaining = (slots_remaining as f64 / slots_per_second) as u64;
+        let round_duration = (total_slots as f64 / slots_per_second) as u64;
+        (time_remaining, round_duration)
+    }
 
     /// Get current board state
     pub fn get_board(&self) -> Result<Board> {

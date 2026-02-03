@@ -181,24 +181,10 @@ async fn main() {
                         let total_deployed: u64 = round.deployed.iter().sum();
                         let active_squares = round.deployed.iter().filter(|&&d| d > 0).count();
                         
-                        // Calculate round timer (slots are ~400ms each)
-                        // ORE rounds are typically 150 slots (~60 seconds)
-                        let slots_per_second: f64 = 2.5; // ~400ms per slot
-                        let round_duration_slots: u64 = if board.end_slot > board.start_slot {
-                            board.end_slot - board.start_slot
-                        } else {
-                            150 // Default ~60 second rounds
-                        };
-                        let round_duration_secs = (round_duration_slots as f64 / slots_per_second) as u64;
-                        
-                        // Get ACTUAL current slot from blockchain
+                        // Use actual block times for accurate round timing
+                        let (time_remaining_secs, round_duration_secs) = parser.get_round_timing(&board);
                         let current_slot = parser.get_slot().unwrap_or(board.start_slot);
-                        let slots_remaining = if board.end_slot > current_slot {
-                            board.end_slot.saturating_sub(current_slot)
-                        } else {
-                            0
-                        };
-                        let time_remaining_secs = (slots_remaining as f64 / slots_per_second) as u64;
+                        let slots_remaining = board.end_slot.saturating_sub(current_slot);
                         
                         info!("📊 Round {} | Deployed: {:.4} SOL | Active: {} squares | ~{}s remaining", 
                             current_round,
