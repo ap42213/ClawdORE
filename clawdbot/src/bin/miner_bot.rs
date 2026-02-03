@@ -227,7 +227,7 @@ impl SmartMinerBot {
 
     #[cfg(not(feature = "database"))]
     async fn load_learned_data(&mut self, _db: &()) {
-        info!("📚 No database available, using default strategies");
+        info!("📚 No database connected, bot will learn through exploration");
     }
 
     /// Get wallet balance

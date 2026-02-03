@@ -272,17 +272,23 @@ impl OreStrategyEngine {
     }
 
     /// Find optimal number of squares based on learned data
+    /// Uses PURE learning - no preset defaults, explores when no data
     pub fn get_optimal_square_count(&self) -> (u8, f64, String) {
-        let mut best_count = 5u8; // Default
+        let mut best_count = 0u8;
         let mut best_score = 0.0f64;
         let mut reasoning = String::new();
 
+        // Find which counts have enough data (minimum 10 samples)
+        let mut counts_with_data = 0;
+        
         // Score each square count by: win_rate * ore_efficiency - cost
         for count in 1..=25u8 {
             let stats = &self.square_count_performance[count as usize];
             if stats.times_used < 10 {
                 continue; // Not enough data
             }
+            
+            counts_with_data += 1;
 
             // Win probability increases with more squares
             let base_win_prob = count as f64 / 25.0;
@@ -303,20 +309,55 @@ impl OreStrategyEngine {
                 best_score = score;
                 best_count = count;
                 reasoning = format!(
-                    "{} squares: {:.1}% win rate, {:.2} efficiency, {} samples",
+                    "LEARNED: {} squares = {:.1}% win rate, {:.2} efficiency, {} samples",
                     count, actual_win_rate * 100.0, ore_efficiency, stats.times_used
                 );
             }
         }
 
-        // If no data, use mathematical optimal
-        if best_score == 0.0 {
-            // Sweet spot is usually 3-7 squares for balance of win chance vs cost
-            best_count = 5;
-            reasoning = "No learned data yet, using default of 5 squares".to_string();
+        // If no sufficient data, EXPLORE - pick the count with LEAST samples to gather data
+        if counts_with_data < 3 || best_score == 0.0 {
+            best_count = self.pick_exploration_count();
+            best_score = 0.0; // No confidence yet
+            reasoning = format!(
+                "EXPLORING: Trying {} squares to gather data ({}+ samples needed per count)",
+                best_count, 10
+            );
         }
 
         (best_count, best_score, reasoning)
+    }
+    
+    /// Pick a square count to explore (one we have less data on)
+    /// Prioritizes counts we've tried least, with slight randomness
+    fn pick_exploration_count(&self) -> u8 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        // Find counts with least samples (exploring the unknown)
+        let mut exploration_candidates: Vec<(u8, u32)> = (1..=25u8)
+            .map(|count| {
+                let samples = self.square_count_performance[count as usize].times_used;
+                (count, samples)
+            })
+            .collect();
+        
+        // Sort by fewest samples first
+        exploration_candidates.sort_by_key(|(_count, samples)| *samples);
+        
+        // Pick from the 5 least-explored counts, with some randomness
+        let candidates: Vec<u8> = exploration_candidates.iter()
+            .take(5)
+            .map(|(count, _)| *count)
+            .collect();
+        
+        // Simple random selection using timestamp
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let idx = (now as usize) % candidates.len();
+        
+        candidates[idx]
     }
 
     /// Get top performing players to learn from
@@ -546,7 +587,7 @@ impl OreStrategyEngine {
             if strategy["confidence"].as_f64().unwrap_or(0.0) > 0.5 {
                 self.apply_detected_strategy(strategy);
             } else {
-                log::info!("🔍 Best strategy confidence too low ({:.0}%), using defaults",
+                log::info!("🔍 Best strategy confidence too low ({:.0}%), will explore instead",
                     strategy["confidence"].as_f64().unwrap_or(0.0) * 100.0);
             }
         }
