@@ -37,8 +37,6 @@ export interface RoundData {
 }
 
 export default function Home() {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
-
   const [bots, setBots] = useState<Bot[]>([
     {
       id: 'coordinator',
@@ -121,12 +119,23 @@ export default function Home() {
   } | null>(null)
 
   const [signals, setSignals] = useState<Signal[]>([])
+  const [mounted, setMounted] = useState(false)
+
+  // Only run on client
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Fetch data from API
   const fetchData = useCallback(async () => {
+    if (typeof window === 'undefined') return
+    
     try {
       // Fetch signals (heartbeats)
-      const signalsRes = await fetch(`${API_URL}/api/signals?limit=50`)
+      const signalsRes = await fetch(`/api/signals?limit=50`, {
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' }
+      })
       if (signalsRes.ok) {
         const data = await signalsRes.json()
         const signalsList = data.signals || []
@@ -182,7 +191,7 @@ export default function Home() {
       }
 
       // Fetch current state
-      const stateRes = await fetch(`${API_URL}/api/state`)
+      const stateRes = await fetch(`/api/state`, { cache: 'no-store' })
       if (stateRes.ok) {
         const data = await stateRes.json()
         
@@ -210,7 +219,7 @@ export default function Home() {
       }
 
       // Fetch stats
-      const statsRes = await fetch(`${API_URL}/api/stats`)
+      const statsRes = await fetch(`/api/stats`, { cache: 'no-store' })
       if (statsRes.ok) {
         const data = await statsRes.json()
         setStats(prev => ({
@@ -225,13 +234,14 @@ export default function Home() {
       console.error('Fetch error:', error)
       setLogs(prev => [...prev.slice(-50), `❌ Error: ${error}`])
     }
-  }, [API_URL])
+  }, [])
 
   useEffect(() => {
+    if (!mounted) return
     fetchData()
     const interval = setInterval(fetchData, 5000) // Poll every 5 seconds
     return () => clearInterval(interval)
-  }, [fetchData])
+  }, [mounted, fetchData])
 
   useEffect(() => {
     const active = bots.filter(bot => bot.status === 'online').length
