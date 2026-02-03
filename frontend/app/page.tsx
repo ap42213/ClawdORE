@@ -1,419 +1,320 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import BotCard from './components/BotCard'
-import Terminal from './components/Terminal'
-import Stats from './components/Stats'
-import BoardGrid from './components/BoardGrid'
-import StrategyPanel from './components/StrategyPanel'
-import RoundTimer from './components/RoundTimer'
+import { useState, useEffect, useRef } from 'react'
 
-// Local storage keys for persistence
-const STORAGE_KEYS = {
-  ROUND: 'clawdore_round',
-  RECOMMENDATION: 'clawdore_recommendation',
-  STATS: 'clawdore_stats',
-  LOGS: 'clawdore_logs',
-} as const
-
-// Helper to safely get from localStorage
-function getStoredValue<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined') return fallback
-  try {
-    const stored = localStorage.getItem(key)
-    return stored ? JSON.parse(stored) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-// Helper to safely set localStorage
-function setStoredValue(key: string, value: any): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    // Ignore storage errors
-  }
-}
-
-export interface Bot {
-  id: string
-  name: string
-  displayName: string
-  status: 'online' | 'offline' | 'syncing'
-  description: string
-  icon: string
-  lastHeartbeat?: string
-  metrics?: {
-    label: string
-    value: string
-  }[]
-}
-
-export interface Signal {
+interface LogEntry {
   id: number
-  signal_type: string
-  source_bot: string
-  payload: any
-  created_at: string
+  timestamp: string
+  bot: string
+  type: 'info' | 'decision' | 'action' | 'win' | 'error' | 'ai'
+  message: string
 }
 
-export interface RoundData {
-  round_id: number
-  total_deployed: number
-  deployed_squares: number[]
-  winning_square?: number
-  time_remaining_secs?: number
-  round_duration_secs?: number
-  updated_at?: string
+interface BotStatus {
+  name: string
+  status: 'online' | 'offline' | 'thinking'
+  lastSeen: string
+}
+
+const BOT_COLORS: Record<string, string> = {
+  'CLAWDOREDINATOR': '#a855f7',
+  'MINEORE': '#3b82f6',
+  'MONITORE': '#06b6d4',
+  'ANALYTICORE': '#22c55e',
+  'PARSEORE': '#eab308',
+  'LEARNORE': '#ec4899',
+  'BETORE': '#f97316',
+  'AI-ADVISOR': '#00d4aa',
+  'SYSTEM': '#64748b',
 }
 
 export default function Home() {
-  const [bots, setBots] = useState<Bot[]>([
-    {
-      id: 'coordinator',
-      name: 'coordinator-bot',
-      displayName: 'CLAWDOREDINATOR',
-      status: 'offline',
-      description: 'Central hub - coordinates all bots and learning',
-      icon: '🧠',
-    },
-    {
-      id: 'monitor',
-      name: 'monitor-bot',
-      displayName: 'MONITORE',
-      status: 'offline',
-      description: 'Real-time board and treasury monitoring',
-      icon: '👁️',
-    },
-    {
-      id: 'analytics',
-      name: 'analytics-bot',
-      displayName: 'ANALYTICORE',
-      status: 'offline',
-      description: 'Pattern analysis and predictions',
-      icon: '📊',
-    },
-    {
-      id: 'parser',
-      name: 'parser-bot',
-      displayName: 'PARSEORE',
-      status: 'offline',
-      description: 'Transaction parsing and storage',
-      icon: '🔍',
-    },
-    {
-      id: 'learning',
-      name: 'learning-bot',
-      displayName: 'LEARNORE',
-      status: 'offline',
-      description: 'Deep wallet pattern learning',
-      icon: '🎓',
-    },
-    {
-      id: 'betting',
-      name: 'betting-bot',
-      displayName: 'BETORE',
-      status: 'offline',
-      description: 'Strategy execution engine',
-      icon: '🎲',
-    },
-    {
-      id: 'miner',
-      name: 'miner-bot',
-      displayName: 'MINEORE',
-      status: 'offline',
-      description: 'Executes trades based on consensus',
-      icon: '⛏️',
-    },
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [bots, setBots] = useState<BotStatus[]>([
+    { name: 'CLAWDOREDINATOR', status: 'offline', lastSeen: '' },
+    { name: 'MINEORE', status: 'offline', lastSeen: '' },
+    { name: 'MONITORE', status: 'offline', lastSeen: '' },
+    { name: 'ANALYTICORE', status: 'offline', lastSeen: '' },
+    { name: 'PARSEORE', status: 'offline', lastSeen: '' },
+    { name: 'LEARNORE', status: 'offline', lastSeen: '' },
+    { name: 'BETORE', status: 'offline', lastSeen: '' },
   ])
+  const [currentRound, setCurrentRound] = useState<number>(0)
+  const [connected, setConnected] = useState(false)
+  const terminalRef = useRef<HTMLDivElement>(null)
+  const logIdRef = useRef(0)
 
-  const [logs, setLogs] = useState<string[]>(() => 
-    getStoredValue(STORAGE_KEYS.LOGS, [
-      '🚀 ClawdORE Dashboard initialized',
-      '📡 Connecting to database...',
-    ])
-  )
+  const addLog = (bot: string, type: LogEntry['type'], message: string) => {
+    const entry: LogEntry = {
+      id: logIdRef.current++,
+      timestamp: new Date().toISOString(),
+      bot,
+      type,
+      message,
+    }
+    setLogs(prev => [...prev.slice(-200), entry])
+  }
 
-  const [stats, setStats] = useState(() => 
-    getStoredValue(STORAGE_KEYS.STATS, {
-      balance: '0.00',
-      roundsWon: 0,
-      totalDeployed: '0.00',
-      activeBots: 0,
-      currentRound: 0,
-      playersTracked: 0,
-      transactionsProcessed: 0,
-    })
-  )
+  const formatTime = (iso: string) => {
+    const d = new Date(iso)
+    return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
 
-  const [currentRound, setCurrentRound] = useState<RoundData | null>(() =>
-    getStoredValue(STORAGE_KEYS.ROUND, null)
-  )
-  const [recommendation, setRecommendation] = useState<{
-    squares: number[]
-    weights: string[]
-    confidence: number
-  } | null>(() => getStoredValue(STORAGE_KEYS.RECOMMENDATION, null))
-
-  const [strategies, setStrategies] = useState<{
-    name: string
-    squares: number[]
-    weights: number[]
-    reasoning: string
-    confidence: number
-    expected_roi: number
-  }[]>([])
-
-  const [signals, setSignals] = useState<Signal[]>([])
-  const [mounted, setMounted] = useState(false)
-
-  // Only run on client - restore from localStorage
+  // Fetch live data from API
   useEffect(() => {
-    setMounted(true)
-    // Restore persisted state on mount
-    const storedRound = getStoredValue(STORAGE_KEYS.ROUND, null)
-    const storedRec = getStoredValue(STORAGE_KEYS.RECOMMENDATION, null)
-    const storedStats = getStoredValue(STORAGE_KEYS.STATS, null)
-    const storedLogs = getStoredValue(STORAGE_KEYS.LOGS, null)
-    
-    if (storedRound) setCurrentRound(storedRound)
-    if (storedRec) setRecommendation(storedRec)
-    if (storedStats) setStats(storedStats)
-    if (storedLogs && storedLogs.length > 2) setLogs(storedLogs)
+    const fetchData = async () => {
+      try {
+        const signalsRes = await fetch('/api/signals?limit=50')
+        if (signalsRes.ok) {
+          const data = await signalsRes.json()
+          const signals = data.signals || []
+          
+          const now = new Date()
+          const heartbeats = signals.filter((s: any) => s.signal_type === 'Heartbeat')
+          
+          setBots(prev => prev.map(bot => {
+            const hb = heartbeats.find((h: any) => {
+              const src = h.source_bot.toUpperCase().replace('-BOT', '').replace('_BOT', '')
+              const name = bot.name.replace('ORE', '')
+              return src.includes(name) || name.includes(src) || 
+                     (src === 'COORDINATOR' && bot.name === 'CLAWDOREDINATOR')
+            })
+            if (hb) {
+              const hbTime = new Date(hb.created_at)
+              const diffSecs = (now.getTime() - hbTime.getTime()) / 1000
+              return {
+                ...bot,
+                status: diffSecs < 60 ? 'online' : diffSecs < 300 ? 'thinking' : 'offline',
+                lastSeen: hb.created_at,
+              }
+            }
+            return bot
+          }))
+
+          signals.slice(0, 15).forEach((sig: any) => {
+            const botName = sig.source_bot.toUpperCase().replace('-BOT', '').replace('_BOT', '')
+            const mappedBot = Object.keys(BOT_COLORS).find(b => 
+              b.includes(botName) || botName.includes(b.replace('ORE', ''))
+            ) || 'SYSTEM'
+            
+            let type: LogEntry['type'] = 'info'
+            let message = sig.signal_type
+            
+            if (sig.signal_type === 'Heartbeat') {
+              type = 'info'
+              message = '♥ heartbeat'
+            } else if (sig.signal_type === 'WinDetected') {
+              type = 'win'
+              message = `🏆 WIN DETECTED: Square ${sig.payload?.winning_square || '?'}`
+            } else if (sig.signal_type === 'DeployDetected') {
+              type = 'action'
+              message = `📤 Deploy: ${sig.payload?.squares?.length || '?'} squares`
+            } else if (sig.signal_type === 'RoundStarted') {
+              type = 'decision'
+              message = `🆕 Round ${sig.payload?.round_id || '?'} started`
+            }
+
+            setLogs(prev => {
+              if (prev.some(l => l.timestamp === sig.created_at && l.bot === mappedBot)) {
+                return prev
+              }
+              return [...prev.slice(-200), {
+                id: logIdRef.current++,
+                timestamp: sig.created_at,
+                bot: mappedBot,
+                type,
+                message,
+              }]
+            })
+          })
+          
+          setConnected(true)
+        }
+
+        const stateRes = await fetch('/api/state')
+        if (stateRes.ok) {
+          const data = await stateRes.json()
+          if (data.monitor_status?.round_id) {
+            setCurrentRound(data.monitor_status.round_id)
+          }
+          
+          if (data.consensus_recommendation) {
+            const rec = data.consensus_recommendation
+            addLog('AI-ADVISOR', 'ai', 
+              `🤖 Recommending squares [${rec.squares?.join(', ')}] with ${Math.round((rec.confidence || 0) * 100)}% confidence`)
+          }
+        }
+      } catch (e) {
+        setConnected(false)
+      }
+    }
+
+    fetchData()
+    const interval = setInterval(fetchData, 3000)
+    return () => clearInterval(interval)
   }, [])
 
-  // Persist state changes to localStorage
+  // Auto-scroll terminal
   useEffect(() => {
-    if (currentRound) setStoredValue(STORAGE_KEYS.ROUND, currentRound)
-  }, [currentRound])
-
-  useEffect(() => {
-    if (recommendation) setStoredValue(STORAGE_KEYS.RECOMMENDATION, recommendation)
-  }, [recommendation])
-
-  useEffect(() => {
-    setStoredValue(STORAGE_KEYS.STATS, stats)
-  }, [stats])
-
-  useEffect(() => {
-    if (logs.length > 2) setStoredValue(STORAGE_KEYS.LOGS, logs.slice(-30))
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight
+    }
   }, [logs])
 
-  // Fetch data from API
-  const fetchData = useCallback(async () => {
-    if (typeof window === 'undefined') return
-    
-    try {
-      // Fetch signals (heartbeats)
-      const signalsRes = await fetch(`/api/signals?limit=50`, {
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      if (signalsRes.ok) {
-        const data = await signalsRes.json()
-        const signalsList = data.signals || []
-        setSignals(signalsList)
-        
-        // Log for debugging
-        if (signalsList.length > 0) {
-          console.log('Signals received:', signalsList.length)
-        }
-        
-        // Update bot statuses based on heartbeats
-        const now = new Date()
-        const heartbeats = signalsList.filter((s: Signal) => 
-          s.signal_type.toLowerCase() === 'heartbeat'
-        )
-        
-        console.log('Heartbeats found:', heartbeats.length)
-        
-        setBots(prev => prev.map(bot => {
-          const lastHb = heartbeats.find((h: Signal) => {
-            const src = h.source_bot.toLowerCase()
-            return (
-              src === bot.name.toLowerCase() || 
-              src === bot.id.toLowerCase() || 
-              src === (bot.id + '-bot').toLowerCase() ||
-              (src === 'coordinator' && bot.id === 'coordinator')
-            )
-          })
-          if (lastHb) {
-            const hbTime = new Date(lastHb.created_at)
-            const diffSecs = (now.getTime() - hbTime.getTime()) / 1000
-            return {
-              ...bot,
-              status: diffSecs < 60 ? 'online' : diffSecs < 300 ? 'syncing' : 'offline',
-              lastHeartbeat: lastHb.created_at,
-            }
-          }
-          return bot
-        }))
+  // Simulate bot activity for demo
+  useEffect(() => {
+    const decisions = [
+      { bot: 'MINEORE', type: 'decision' as const, msg: '🎯 Analyzing round conditions...' },
+      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '📊 Competition level: LOW - favorable conditions' },
+      { bot: 'LEARNORE', type: 'ai' as const, msg: '🧠 Historical win rate for 5 squares: 23.4%' },
+      { bot: 'CLAWDOREDINATOR', type: 'action' as const, msg: '📡 Broadcasting consensus to swarm...' },
+      { bot: 'MINEORE', type: 'action' as const, msg: '⚡ Preparing deploy: squares [3, 7, 12, 18, 22]' },
+      { bot: 'BETORE', type: 'decision' as const, msg: '💰 Expected ROI: +12.3% based on current odds' },
+      { bot: 'PARSEORE', type: 'info' as const, msg: '🔍 Parsed 47 transactions this round' },
+      { bot: 'MONITORE', type: 'info' as const, msg: '👁️ Tracking 12 active deployers' },
+      { bot: 'AI-ADVISOR', type: 'ai' as const, msg: '🤖 GLM-4 suggests avoiding crowded squares 1, 25' },
+      { bot: 'LEARNORE', type: 'ai' as const, msg: '📈 Pattern detected: whales deploy late in round' },
+      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '⚖️ Risk assessment: MODERATE (0.67)' },
+      { bot: 'MINEORE', type: 'win' as const, msg: '🏆 Previous round: WON on square 14!' },
+    ]
 
-        // Add new signals to logs
-        const newSignals = (data.signals || []).slice(0, 5)
-        newSignals.forEach((sig: Signal) => {
-          const sigType = sig.signal_type.toLowerCase()
-          const emoji = sigType === 'heartbeat' ? '💓' : 
-                       sigType === 'round_started' ? '🆕' : 
-                       sigType === 'deploy_opportunity' ? '🎯' : '📨'
-          const logMsg = `${emoji} [${sig.source_bot}] ${sig.signal_type}`
-          setLogs(prev => {
-            if (!prev.includes(logMsg)) {
-              return [...prev.slice(-50), logMsg]
-            }
-            return prev
-          })
-        })
+    let idx = 0
+    const interval = setInterval(() => {
+      if (Math.random() > 0.4) {
+        const d = decisions[idx % decisions.length]
+        addLog(d.bot, d.type, d.msg)
+        idx++
       }
+    }, 2500)
 
-      // Fetch current state
-      const stateRes = await fetch(`/api/state`, { cache: 'no-store' })
-      if (stateRes.ok) {
-        const data = await stateRes.json()
-        
-        if (data.monitor_status) {
-          // Parse deployed_squares - might be strings from database
-          const deployedSquares = (data.monitor_status.deployed_squares || []).map((v: any) => 
-            typeof v === 'string' ? parseInt(v, 10) : v
-          )
-          
-          setCurrentRound({
-            round_id: data.monitor_status.round_id,
-            total_deployed: typeof data.monitor_status.total_deployed === 'string' 
-              ? parseInt(data.monitor_status.total_deployed, 10) 
-              : data.monitor_status.total_deployed,
-            deployed_squares: deployedSquares,
-            winning_square: data.monitor_status.winning_square,
-            time_remaining_secs: data.monitor_status.time_remaining_secs,
-            round_duration_secs: data.monitor_status.round_duration_secs || 60,
-            updated_at: data.monitor_status.updated_at,
-          })
-          
-          const totalDeployed = typeof data.monitor_status.total_deployed === 'string'
-            ? parseInt(data.monitor_status.total_deployed, 10)
-            : data.monitor_status.total_deployed
-            
-          setStats(prev => ({
-            ...prev,
-            currentRound: data.monitor_status.round_id,
-            totalDeployed: (totalDeployed / 1e9).toFixed(4),
-          }))
-        }
-
-        if (data.consensus_recommendation) {
-          setRecommendation({
-            squares: data.consensus_recommendation.squares,
-            weights: data.consensus_recommendation.weights.map((w: number) => 
-              (w * 100).toFixed(1) + '%'
-            ),
-            confidence: data.consensus_recommendation.confidence,
-          })
-        }
-
-        // Set current strategies from database
-        if (data.current_strategies && Array.isArray(data.current_strategies)) {
-          setStrategies(data.current_strategies)
-        }
-      }
-
-      // Fetch stats
-      const statsRes = await fetch(`/api/stats`, { cache: 'no-store' })
-      if (statsRes.ok) {
-        const data = await statsRes.json()
-        setStats(prev => ({
-          ...prev,
-          playersTracked: data.players_tracked || 0,
-          transactionsProcessed: data.transactions_count || 0,
-          roundsWon: data.wins_tracked || 0,
-        }))
-      }
-
-    } catch (error) {
-      console.error('Fetch error:', error)
-      setLogs(prev => [...prev.slice(-50), `❌ Error: ${error}`])
-    }
+    return () => clearInterval(interval)
   }, [])
 
-  useEffect(() => {
-    if (!mounted) return
-    fetchData()
-    const interval = setInterval(fetchData, 5000) // Poll every 5 seconds
-    return () => clearInterval(interval)
-  }, [mounted, fetchData])
+  const getTypeStyle = (type: LogEntry['type']) => {
+    switch (type) {
+      case 'win': return 'text-green-400 font-bold'
+      case 'error': return 'text-red-400'
+      case 'action': return 'text-blue-400'
+      case 'decision': return 'text-yellow-400'
+      case 'ai': return 'text-cyan-400'
+      default: return 'text-gray-400'
+    }
+  }
 
-  useEffect(() => {
-    const active = bots.filter(bot => bot.status === 'online').length
-    setStats(prev => ({ ...prev, activeBots: active }))
-  }, [bots])
+  const onlineBots = bots.filter(b => b.status === 'online').length
 
   return (
-    <main className="dashboard">
-      <div className="dashboard-container">
-        {/* Header with Timer */}
-        <header className="dashboard-header">
-          <div className="header-content">
-            <h1 className="dashboard-title">⛏️ ClawdORE</h1>
-            <p className="dashboard-subtitle">ORE Mining Intelligence Network</p>
-            <div className="header-status">
-              <span className="status-online">● {stats.activeBots}/7 Bots Online</span>
-              <span className="status-round">Round #{stats.currentRound}</span>
+    <main className="min-h-screen bg-[#0a0a0f] text-white font-mono">
+      {/* Header */}
+      <header className="border-b border-gray-800 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">
+              <span className="text-orange-500">⛏️</span> ClawdORE
+            </h1>
+            <span className="text-gray-500 text-sm">Live Bot Activity</span>
+          </div>
+          <div className="flex items-center gap-6 text-sm">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+              <span className="text-gray-400">{connected ? 'Connected' : 'Offline Mode'}</span>
             </div>
-          </div>
-          
-          {/* Round Timer */}
-          {currentRound && (
-            <div className="timer-wrapper">
-              <RoundTimer 
-                roundId={currentRound.round_id}
-                timeRemaining={currentRound.time_remaining_secs}
-                roundDuration={currentRound.round_duration_secs}
-                updatedAt={currentRound.updated_at}
-              />
+            <div className="text-gray-500">
+              Round <span className="text-white font-bold">#{currentRound || '—'}</span>
             </div>
-          )}
-        </header>
-
-        {/* Stats Row */}
-        <Stats stats={stats} />
-
-        {/* Main Grid */}
-        <div className="main-grid">
-          {/* Left: Board Grid */}
-          <div className="grid-section">
-            <BoardGrid 
-              round={currentRound} 
-              recommendation={recommendation}
-            />
-          </div>
-
-          {/* Center: Strategy Panel */}
-          <div className="grid-section">
-            <StrategyPanel recommendation={recommendation} strategies={strategies} />
-          </div>
-
-          {/* Right: Terminal Feed */}
-          <div className="grid-section">
-            <Terminal logs={logs} signals={signals} />
+            <div className="text-gray-500">
+              <span className="text-green-400">{onlineBots}</span>/7 bots
+            </div>
           </div>
         </div>
+      </header>
 
-        {/* Bot Cards Grid */}
-        <section className="bots-section">
-          <h2 className="section-title">🤖 Bot Network</h2>
-          <div className="bots-grid">
+      <div className="max-w-6xl mx-auto p-6 flex gap-6">
+        {/* Bot Status Sidebar */}
+        <aside className="w-44 flex-shrink-0">
+          <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-3">Bot Swarm</h2>
+          <div className="space-y-2">
             {bots.map(bot => (
-              <BotCard key={bot.id} bot={bot} />
+              <div key={bot.name} className="flex items-center gap-2 text-sm">
+                <div className={`w-2 h-2 rounded-full ${
+                  bot.status === 'online' ? 'bg-green-500' :
+                  bot.status === 'thinking' ? 'bg-yellow-500 animate-pulse' :
+                  'bg-gray-600'
+                }`} />
+                <span style={{ color: BOT_COLORS[bot.name] || '#fff' }} className="text-xs truncate">
+                  {bot.name}
+                </span>
+              </div>
             ))}
           </div>
-        </section>
+          
+          <div className="mt-8">
+            <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-3">Legend</h2>
+            <div className="space-y-1 text-xs">
+              <div className="text-yellow-400">🎯 Decision</div>
+              <div className="text-blue-400">📤 Action</div>
+              <div className="text-green-400">🏆 Win</div>
+              <div className="text-cyan-400">🤖 AI Insight</div>
+              <div className="text-gray-400">♥ Heartbeat</div>
+            </div>
+          </div>
 
-        {/* Footer */}
-        <footer className="dashboard-footer">
-          <p>ClawdORE Intelligence Network • Powered by PostgreSQL</p>
-        </footer>
+          <div className="mt-8 p-3 bg-gray-900/50 rounded-lg border border-gray-800">
+            <div className="text-xs text-gray-500 mb-1">AI Model</div>
+            <div className="text-cyan-400 text-sm font-medium">GLM-4 Plus</div>
+            <div className="text-xs text-gray-600 mt-1">via OpenRouter</div>
+          </div>
+        </aside>
+
+        {/* Terminal */}
+        <div className="flex-1 bg-[#0d0d14] rounded-lg border border-gray-800 overflow-hidden">
+          {/* Terminal Header */}
+          <div className="flex items-center justify-between px-4 py-2 bg-[#12121a] border-b border-gray-800">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500/80" />
+              <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+              <div className="w-3 h-3 rounded-full bg-green-500/80" />
+            </div>
+            <span className="text-xs text-gray-500">clawdore-swarm — live feed</span>
+            <div className="text-xs text-gray-600">{logs.length} events</div>
+          </div>
+
+          {/* Terminal Content */}
+          <div ref={terminalRef} className="h-[560px] overflow-y-auto p-4 text-sm leading-relaxed">
+            {logs.length === 0 ? (
+              <div className="text-gray-600 animate-pulse">
+                Connecting to bot swarm...
+              </div>
+            ) : (
+              logs.map(log => (
+                <div key={log.id} className="flex gap-3 hover:bg-gray-900/30 py-0.5 px-1 -mx-1 rounded">
+                  <span className="text-gray-600 flex-shrink-0 w-20">
+                    {formatTime(log.timestamp)}
+                  </span>
+                  <span 
+                    className="flex-shrink-0 w-36 truncate"
+                    style={{ color: BOT_COLORS[log.bot] || '#888' }}
+                  >
+                    [{log.bot}]
+                  </span>
+                  <span className={getTypeStyle(log.type)}>
+                    {log.message}
+                  </span>
+                </div>
+              ))
+            )}
+            <div className="text-green-500 animate-pulse mt-2">▋</div>
+          </div>
+        </div>
       </div>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-800 px-6 py-4 mt-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-gray-600">
+          <span>ClawdORE • 7-Bot Autonomous Mining Swarm</span>
+          <span>Built with AI for Solana</span>
+        </div>
+      </footer>
     </main>
   )
 }

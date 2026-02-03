@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Terminal scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d0d14;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    ORE REGOLITH DASHBOARD - Professional Dark Theme
    ═══════════════════════════════════════════════════════════════════════════ */
