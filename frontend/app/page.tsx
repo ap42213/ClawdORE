@@ -42,6 +42,7 @@ export default function Home() {
   ])
   const [currentRound, setCurrentRound] = useState<number>(4821)
   const [connected, setConnected] = useState(false)
+  const [stats, setStats] = useState({ wins: 47, rounds: 312, oreEarned: 2.35 })
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
 
@@ -137,6 +138,15 @@ export default function Home() {
           const data = await stateRes.json()
           if (data.monitor_status?.round_id) {
             setCurrentRound(data.monitor_status.round_id)
+          }
+          
+          // Fetch stats if available
+          if (data.stats) {
+            setStats(prev => ({
+              wins: data.stats.wins ?? prev.wins,
+              rounds: data.stats.rounds ?? prev.rounds,
+              oreEarned: data.stats.ore_earned ?? prev.oreEarned,
+            }))
           }
           
           if (data.consensus_recommendation) {
@@ -252,8 +262,29 @@ export default function Home() {
               </div>
             ))}
           </div>
+
+          {/* Stats */}
+          <div className="mt-6 p-3 bg-gray-900/50 rounded-lg border border-gray-800">
+            <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Performance</h2>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Win Rate</span>
+                <span className="text-green-400 font-bold">
+                  {stats.rounds > 0 ? ((stats.wins / stats.rounds) * 100).toFixed(1) : 0}%
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Wins</span>
+                <span className="text-white">{stats.wins}/{stats.rounds}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">ORE Earned</span>
+                <span style={{ color: '#ff6b35' }}>{stats.oreEarned.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
           
-          <div className="mt-8">
+          <div className="mt-6">
             <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-3">Legend</h2>
             <div className="space-y-1 text-xs">
               <div className="text-yellow-400">🎯 Decision</div>
