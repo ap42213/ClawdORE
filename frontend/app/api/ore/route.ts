@@ -22,6 +22,7 @@ function readU64(data: Buffer | Uint8Array, offset: number): bigint {
 }
 
 // Calculate winning square from slot_hash (same algorithm as ore-api)
+// Returns 1-25 (ORE uses 1-indexed squares)
 function calculateWinningSquare(slotHash: Uint8Array): number | null {
   // Check if slot_hash is unset (all zeros or all 255s)
   const allZeros = slotHash.every(b => b === 0)
@@ -35,8 +36,8 @@ function calculateWinningSquare(slotHash: Uint8Array): number | null {
   const r4 = readU64(slotHash, 24)
   const rng = r1 ^ r2 ^ r3 ^ r4
   
-  // Winning square = rng % 25
-  return Number(rng % BigInt(25))
+  // Winning square = (rng % 25) + 1 to get 1-25 range
+  return Number(rng % BigInt(25)) + 1
 }
 
 export async function GET() {
