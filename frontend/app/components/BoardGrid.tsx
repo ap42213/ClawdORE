@@ -63,7 +63,7 @@ export default function BoardGrid({ round, recommendation }: BoardGridProps) {
             key={idx}
             className={`aspect-square rounded-lg flex flex-col items-center justify-center text-xs font-mono transition-all ${getSquareColor(idx)} hover:scale-105`}
           >
-            <span className="text-gray-400 text-[10px]">#{idx}</span>
+            <span className="text-gray-400 text-[10px]">#{idx + 1}</span>
             {getDeployed(idx) && (
               <span className="text-green-300 text-[10px] font-bold">
                 {getDeployed(idx)}
