@@ -154,6 +154,12 @@ async fn main() {
                 if current_round != last_round_id && last_round_id != 0 {
                     info!("{}", format!("🆕 NEW ROUND: {} → {}", last_round_id, current_round).green().bold());
                     
+                    // Get winning square from completed round
+                    if let Ok(Some((winning_square, motherlode))) = parser.get_round_result(last_round_id) {
+                        info!("🎯 Round {} RESULT: Winning square {} {}", 
+                            last_round_id, winning_square, if motherlode { "🎰 MOTHERLODE!" } else { "" });
+                    }
+                    
                     #[cfg(feature = "database")]
                     if let Some(ref db) = db {
                         let signal = Signal::new(

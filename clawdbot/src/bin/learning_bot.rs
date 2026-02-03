@@ -216,6 +216,98 @@ async fn main() {
                 if round_id != last_round_id && last_round_id != 0 {
                     info!("{}", format!("🔄 Round {} completed, analyzing...", last_round_id).green());
                     
+                    // Get winning square from completed round's slot_hash
+                    if let Ok(Some((winning_square, motherlode))) = parser.get_round_result(last_round_id) {
+                        info!("🎯 Round {} RESULT: Winning square {} {}", 
+                            last_round_id, winning_square, if motherlode { "🎰 MOTHERLODE!" } else { "" });
+                        
+                        // Get round data for analysis
+                        if let Ok(round_data) = parser.get_round(last_round_id) {
+                            let total_sol: u64 = round_data.deployed.iter().sum();
+                            let winning_sq = winning_square as usize;
+                            let competition_on_square = if winning_sq < 25 { round_data.deployed[winning_sq] } else { 0 };
+                            let num_deployers = round_data.deployed.iter().filter(|&&d| d > 0).count() as u32;
+                            let is_full_ore = total_sol < 2 * LAMPORTS_PER_SOL;
+                            let ore_earned = if is_full_ore { 1.0 } else { 
+                                1.0 / (num_deployers.max(1) as f64 / 2.0) 
+                            };
+                            
+                            info!("   📊 Round Analysis:");
+                            info!("      • Total deployed: {:.4} SOL", total_sol as f64 / LAMPORTS_PER_SOL as f64);
+                            info!("      • Deployers: {}", num_deployers);
+                            info!("      • Competition on square {}: {:.4} SOL", 
+                                winning_square, competition_on_square as f64 / LAMPORTS_PER_SOL as f64);
+                            info!("      • Full ORE: {}", if is_full_ore { "YES ✅" } else { "No" });
+                            
+                            // Find who won from tracked deploys
+                            let mut winners_found = 0;
+                            for (address, (amount, squares)) in &current_round_deploys {
+                                if squares.contains(&winning_square) {
+                                    winners_found += 1;
+                                    let num_squares = squares.len() as u8;
+                                    let winner_share = if competition_on_square > 0 {
+                                        *amount as f64 / competition_on_square as f64
+                                    } else {
+                                        1.0
+                                    };
+                                    
+                                    info!("{}", format!(
+                                        "   👤 Winner: {} bet {:.4} SOL on {} squares, share: {:.1}%",
+                                        &address[..8.min(address.len())],
+                                        *amount as f64 / LAMPORTS_PER_SOL as f64,
+                                        num_squares,
+                                        winner_share * 100.0
+                                    ).green());
+                                    
+                                    // Create win record
+                                    let win = WinRecord {
+                                        round_id: last_round_id,
+                                        winner_address: address.clone(),
+                                        winning_square,
+                                        amount_bet: *amount,
+                                        amount_won: (competition_on_square as f64 * winner_share) as u64,
+                                        squares_bet: squares.clone(),
+                                        num_squares,
+                                        total_round_sol: total_sol,
+                                        num_deployers,
+                                        is_motherlode: motherlode,
+                                        is_full_ore,
+                                        ore_earned,
+                                        competition_on_square,
+                                        winner_share_pct: winner_share,
+                                        slot: 0,
+                                        timestamp: None,
+                                    };
+                                    
+                                    learning_engine.record_win(win.clone());
+                                    
+                                    #[cfg(feature = "database")]
+                                    if let Some(ref db) = db {
+                                        db.record_detailed_win(
+                                            &address,
+                                            last_round_id as i64,
+                                            winning_square as i16,
+                                            num_squares as i16,
+                                            *amount as i64,
+                                            (competition_on_square as f64 * winner_share) as i64,
+                                            total_sol as i64,
+                                            num_deployers as i32,
+                                            is_full_ore,
+                                            motherlode,
+                                            ore_earned as f32,
+                                        ).await.ok();
+                                    }
+                                }
+                            }
+                            
+                            if winners_found > 0 {
+                                info!("🏆 Detected {} winners on square {}", winners_found, winning_square);
+                            }
+                        }
+                    } else {
+                        warn!("⚠️ Could not determine winning square for round {}", last_round_id);
+                    }
+                    
                     // Clear deploys for new round
                     current_round_deploys.clear();
                 }

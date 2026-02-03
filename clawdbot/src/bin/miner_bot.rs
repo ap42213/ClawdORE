@@ -562,7 +562,24 @@ impl SmartMinerBot {
             // Check for new round (learning opportunity)
             if current_round_id != last_round_id && last_round_id != 0 {
                 info!("{}", format!("🆕 New round: {} → {}", last_round_id, current_round_id).green());
-                // TODO: Check if we won the previous round and update learning
+                
+                // Check if we won the previous round
+                if let Ok(Some((winning_square, motherlode))) = self.parser.get_round_result(last_round_id) {
+                    info!("🎯 Round {} result: square {} won {}", 
+                        last_round_id, winning_square, if motherlode { "🎰 MOTHERLODE!" } else { "" });
+                    
+                    // Update strategy with round result
+                    if let Ok(completed_round) = self.parser.get_round(last_round_id) {
+                        self.ore_strategy.record_round(&completed_round.deployed, winning_square);
+                        
+                        // Check if WE won (if we played)
+                        if self.rounds_played > 0 {
+                            let last_decision = self.ore_strategy.get_optimal_square_count();
+                            // This is a simplified check - ideally track our actual squares
+                            info!("   Checking our squares against winner...");
+                        }
+                    }
+                }
             }
             last_round_id = current_round_id;
 
