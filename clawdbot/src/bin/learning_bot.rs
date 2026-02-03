@@ -298,7 +298,7 @@ async fn main() {
                                             is_full_ore,
                                             ore_earned as f32,
                                             competition_on_square as i64,
-                                            winner_share,
+                                            winner_share as f32,
                                             0_i64,
                                         ).await.ok();
                                     }

@@ -378,7 +378,7 @@ async fn main() {
                                 
                                 // Record win in learning engine
                                 let competition_on_sq = if winning_sq_usize < 25 { completed.deployed[winning_sq_usize] } else { 0 };
-                                let winner_share = if competition_on_sq > 0 { (*deploy_amount as f64 / competition_on_sq as f64) as f32 } else { 1.0 };
+                                let winner_share: f64 = if competition_on_sq > 0 { *deploy_amount as f64 / competition_on_sq as f64 } else { 1.0 };
                                 learning_engine.record_win(WinRecord {
                                     round_id: last_round_id,
                                     winner_address: address.clone(),
@@ -416,12 +416,13 @@ async fn main() {
                                 #[cfg(feature = "database")]
                                 if let Some(ref db) = db {
                                     let squares_i32: Vec<i32> = squares.iter().map(|s| *s as i32).collect();
+                                    let amount_won_calc = (winnings * (*deploy_amount) / competition_on_sq.max(1)) as i64;
                                     db.record_win(
                                         last_round_id as i64,
                                         address,
                                         winning_square as i16,
                                         *deploy_amount as i64,
-                                        winnings * (*deploy_amount) / competition_on_sq.max(1) as i64,
+                                        amount_won_calc,
                                         &squares_i32,
                                         num_squares as i16,
                                         total_deployed as i64,
@@ -430,7 +431,7 @@ async fn main() {
                                         is_full_ore,
                                         if is_full_ore { 1.0 } else { 0.5 },
                                         competition_on_sq as i64,
-                                        winner_share,
+                                        winner_share as f32,
                                         0_i64,
                                     ).await.ok();
                                 }
