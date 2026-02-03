@@ -567,27 +567,27 @@ impl BlockchainParser {
         if let Some(meta) = &tx.transaction.meta {
             // Check return data for ResetEvent
             if let solana_transaction_status::option_serializer::OptionSerializer::Some(return_data) = &meta.return_data {
-                if let solana_transaction_status::option_serializer::OptionSerializer::Some(data_str) = &return_data.data {
-                    // Data is base64 encoded
-                    if let Ok(data) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data_str.0) {
-                        if data.len() >= 48 {
-                            // ResetEvent: disc(8), round_id(8), start_slot(8), end_slot(8), winning_square(8)
-                            let round_id = u64::from_le_bytes(data[8..16].try_into().ok()?);
-                            let winning_square = u64::from_le_bytes(data[32..40].try_into().ok()?) as u8;
-                            
-                            // Check for motherlode in the event (offset 48 = motherlode amount, non-zero means hit)
-                            let motherlode = if data.len() >= 56 {
-                                u64::from_le_bytes(data[48..56].try_into().unwrap_or([0; 8])) > 0
-                            } else {
-                                false
-                            };
-                            
-                            return Some(ResetData {
-                                round_id,
-                                winning_square,
-                                motherlode,
-                            });
-                        }
+                // return_data.data is a tuple (String, UiReturnDataEncoding)
+                let data_str = &return_data.data.0;
+                // Data is base64 encoded
+                if let Ok(data) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data_str) {
+                    if data.len() >= 48 {
+                        // ResetEvent: disc(8), round_id(8), start_slot(8), end_slot(8), winning_square(8)
+                        let round_id = u64::from_le_bytes(data[8..16].try_into().ok()?);
+                        let winning_square = u64::from_le_bytes(data[32..40].try_into().ok()?) as u8;
+                        
+                        // Check for motherlode in the event (offset 48 = motherlode amount, non-zero means hit)
+                        let motherlode = if data.len() >= 56 {
+                            u64::from_le_bytes(data[48..56].try_into().unwrap_or([0; 8])) > 0
+                        } else {
+                            false
+                        };
+                        
+                        return Some(ResetData {
+                            round_id,
+                            winning_square,
+                            motherlode,
+                        });
                     }
                 }
             }
