@@ -730,6 +730,7 @@ impl StrategyEngine {
     }
     
     /// Get consensus recommendation for N squares (1-25)
+    /// Note: Returns squares as 1-25 (not 0-24) to match ORE UI
     pub fn get_consensus_recommendation_n(&self, current_deployed: &[u64; 25], num_squares: usize) -> StrategyRecommendation {
         let num_squares = num_squares.max(1).min(25);
         let recs = self.get_recommendations(current_deployed);
@@ -739,7 +740,11 @@ impl StrategyEngine {
         
         for rec in &recs {
             for (sq, weight) in rec.squares.iter().zip(&rec.weights) {
-                square_scores[*sq] += weight * rec.confidence;
+                // rec.squares may be 0-24 or 1-25 depending on source, normalize to 0-24 for indexing
+                let idx = if *sq > 0 && *sq <= 25 { sq - 1 } else { *sq };
+                if idx < 25 {
+                    square_scores[idx] += weight * rec.confidence;
+                }
             }
         }
 
@@ -752,7 +757,8 @@ impl StrategyEngine {
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let top_squares: Vec<usize> = scored.iter().take(num_squares).map(|(i, _)| *i).collect();
+        // Convert 0-24 indices to 1-25 for output
+        let top_squares: Vec<usize> = scored.iter().take(num_squares).map(|(i, _)| i + 1).collect();
         let total_score: f64 = scored.iter().take(num_squares).map(|(_, s)| s).sum();
         let weights: Vec<f64> = if total_score > 0.0 {
             scored.iter().take(num_squares).map(|(_, s)| s / total_score).collect()
@@ -768,7 +774,7 @@ impl StrategyEngine {
             weights,
             confidence,
             expected_roi: 0.2,
-            reasoning: format!("Weighted consensus across all strategies ({} squares)", num_squares),
+            reasoning: format!("Weighted consensus across all strategies ({} squares, 1-25 range)", num_squares),
         }
     }
 }

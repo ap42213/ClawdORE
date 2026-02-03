@@ -264,6 +264,7 @@ impl OreStrategyEngine {
         }
         
         // Track winning square frequency for pattern detection
+        // Note: empty_squares stored as 1-25 to match ORE UI
         self.round_history.push(RoundConditions {
             round_id: 0, // Set externally if needed
             total_deployed: deployed.iter().sum(),
@@ -272,7 +273,7 @@ impl OreStrategyEngine {
             competition_level: CompetitionLevel::from_deployed(deployed.iter().sum()),
             expected_ore_multiplier: 1.0,
             squares_with_deploys: num_squares,
-            empty_squares: deployed.iter().enumerate().filter(|(_, &d)| d == 0).map(|(i, _)| i).collect(),
+            empty_squares: deployed.iter().enumerate().filter(|(_, &d)| d == 0).map(|(i, _)| i + 1).collect(),
         });
         
         // Keep only last 1000 rounds
@@ -282,13 +283,15 @@ impl OreStrategyEngine {
     }
 
     /// Analyze current round conditions
+    /// Note: empty_squares returned as 1-25 (not 0-24) to match ORE UI
     pub fn analyze_round(&self, deployed: &[u64; 25], num_deployers: u32) -> RoundConditions {
         let total_deployed: u64 = deployed.iter().sum();
         let squares_with_deploys = deployed.iter().filter(|&&d| d > 0).count() as u8;
+        // Convert 0-24 indices to 1-25 for output
         let empty_squares: Vec<usize> = deployed.iter()
             .enumerate()
             .filter(|(_, &d)| d == 0)
-            .map(|(i, _)| i)
+            .map(|(i, _)| i + 1)  // +1 to convert to 1-25
             .collect();
 
         let avg_deploy_size = if num_deployers > 0 {
@@ -551,20 +554,21 @@ impl OreStrategyEngine {
         let (optimal_count, _, square_reasoning) = self.get_optimal_square_count();
         
         // Use consensus squares if available, otherwise pick based on empty squares
+        // All squares are 1-25 range
         let squares: Vec<usize> = if !consensus_squares.is_empty() && consensus_confidence > 0.4 {
             consensus_squares.iter()
                 .take(optimal_count as usize)
                 .copied()
                 .collect()
         } else if !conditions.empty_squares.is_empty() {
-            // Prefer empty squares (less competition)
+            // Prefer empty squares (less competition) - already 1-25
             conditions.empty_squares.iter()
                 .take(optimal_count as usize)
                 .copied()
                 .collect()
         } else {
-            // Random fallback
-            (0..optimal_count as usize).collect()
+            // Random fallback - use 1-25 range
+            (1..=optimal_count as usize).collect()
         };
 
         let num_squares = squares.len();
