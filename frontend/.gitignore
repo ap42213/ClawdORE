@@ -18,3 +18,4 @@ dist
 # Ignore IDE
 .vscode
 .idea
+.vercel
