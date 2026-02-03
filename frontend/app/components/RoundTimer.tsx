@@ -1,0 +1,92 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+
+interface RoundTimerProps {
+  roundId: number
+  timeRemaining?: number
+  roundDuration?: number
+  updatedAt?: string
+}
+
+export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60, updatedAt }: RoundTimerProps) {
+  const [displayTime, setDisplayTime] = useState(timeRemaining || 0)
+  
+  useEffect(() => {
+    if (timeRemaining === undefined) return
+    
+    // Calculate how much time has passed since the update
+    let adjustedTime = timeRemaining
+    if (updatedAt) {
+      const updateTime = new Date(updatedAt).getTime()
+      const now = Date.now()
+      const elapsedSecs = Math.floor((now - updateTime) / 1000)
+      adjustedTime = Math.max(0, timeRemaining - elapsedSecs)
+    }
+    
+    setDisplayTime(adjustedTime)
+    
+    // Count down locally
+    const interval = setInterval(() => {
+      setDisplayTime(prev => {
+        if (prev <= 0) return roundDuration // Reset for new round
+        return prev - 1
+      })
+    }, 1000)
+    
+    return () => clearInterval(interval)
+  }, [timeRemaining, updatedAt, roundDuration])
+  
+  const minutes = Math.floor(displayTime / 60)
+  const seconds = displayTime % 60
+  
+  // Progress percentage (inverted - fills as time passes)
+  const progress = roundDuration > 0 ? ((roundDuration - displayTime) / roundDuration) * 100 : 0
+  
+  // Color based on time remaining
+  const getColor = () => {
+    if (displayTime <= 10) return 'text-red-400'
+    if (displayTime <= 20) return 'text-yellow-400'
+    return 'text-green-400'
+  }
+  
+  const getBarColor = () => {
+    if (displayTime <= 10) return 'bg-red-500'
+    if (displayTime <= 20) return 'bg-yellow-500'
+    return 'bg-green-500'
+  }
+
+  return (
+    <div className="bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700/50">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">⏱️</span>
+          <div>
+            <div className="text-xs text-gray-500 uppercase tracking-wide">Round #{roundId}</div>
+            <div className={`text-2xl font-mono font-bold ${getColor()}`}>
+              {minutes}:{seconds.toString().padStart(2, '0')}
+            </div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-gray-500">Round Duration</div>
+          <div className="text-sm text-gray-400">~{roundDuration}s</div>
+        </div>
+      </div>
+      
+      {/* Progress bar */}
+      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+        <div 
+          className={`h-full ${getBarColor()} transition-all duration-1000 ease-linear`}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      
+      {displayTime <= 10 && displayTime > 0 && (
+        <div className="mt-2 text-center text-xs text-red-400 animate-pulse">
+          ⚠️ Round ending soon!
+        </div>
+      )}
+    </div>
+  )
+}

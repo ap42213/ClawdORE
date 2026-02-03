@@ -175,10 +175,30 @@ async fn main() {
                         let total_deployed: u64 = round.deployed.iter().sum();
                         let active_squares = round.deployed.iter().filter(|&&d| d > 0).count();
                         
-                        info!("📊 Round {} | Deployed: {:.4} SOL | Active: {} squares", 
+                        // Calculate round timer (slots are ~400ms each)
+                        // ORE rounds are typically 150 slots (~60 seconds)
+                        let slots_per_second: f64 = 2.5; // ~400ms per slot
+                        let round_duration_slots: u64 = if board.end_slot > board.start_slot {
+                            board.end_slot - board.start_slot
+                        } else {
+                            150 // Default ~60 second rounds
+                        };
+                        let round_duration_secs = (round_duration_slots as f64 / slots_per_second) as u64;
+                        
+                        // Get current slot estimate (approximate - we use the board's view)
+                        let current_slot_estimate = board.start_slot + (round.deployed.iter().filter(|&&d| d > 0).count() as u64 * 2);
+                        let slots_remaining = if board.end_slot > current_slot_estimate {
+                            board.end_slot.saturating_sub(current_slot_estimate)
+                        } else {
+                            0
+                        };
+                        let time_remaining_secs = (slots_remaining as f64 / slots_per_second) as u64;
+                        
+                        info!("📊 Round {} | Deployed: {:.4} SOL | Active: {} squares | ~{}s remaining", 
                             current_round,
                             total_deployed as f64 / 1_000_000_000.0,
-                            active_squares);
+                            active_squares,
+                            time_remaining_secs);
 
                         // Store monitoring data
                         #[cfg(feature = "database")]
@@ -189,6 +209,10 @@ async fn main() {
                                 "active_squares": active_squares,
                                 "start_slot": board.start_slot,
                                 "end_slot": board.end_slot,
+                                "round_duration_secs": round_duration_secs,
+                                "time_remaining_secs": time_remaining_secs,
+                                "slots_remaining": slots_remaining,
+                                "deployed_squares": round.deployed.iter().map(|&d| d).collect::<Vec<_>>(),
                                 "updated_at": chrono::Utc::now().to_rfc3339(),
                             })).await.ok();
                         }

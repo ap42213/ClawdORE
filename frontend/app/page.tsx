@@ -6,6 +6,7 @@ import Terminal from './components/Terminal'
 import Stats from './components/Stats'
 import BoardGrid from './components/BoardGrid'
 import StrategyPanel from './components/StrategyPanel'
+import RoundTimer from './components/RoundTimer'
 
 // Local storage keys for persistence
 const STORAGE_KEYS = {
@@ -63,6 +64,9 @@ export interface RoundData {
   total_deployed: number
   deployed_squares: number[]
   winning_square?: number
+  time_remaining_secs?: number
+  round_duration_secs?: number
+  updated_at?: string
 }
 
 export default function Home() {
@@ -282,6 +286,9 @@ export default function Home() {
               : data.monitor_status.total_deployed,
             deployed_squares: deployedSquares,
             winning_square: data.monitor_status.winning_square,
+            time_remaining_secs: data.monitor_status.time_remaining_secs,
+            round_duration_secs: data.monitor_status.round_duration_secs || 60,
+            updated_at: data.monitor_status.updated_at,
           })
           
           const totalDeployed = typeof data.monitor_status.total_deployed === 'string'
@@ -344,17 +351,33 @@ export default function Home() {
   return (
     <main className="min-h-screen p-4 md:p-8 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <h1 className="text-5xl font-bold mb-2 bg-gradient-to-r from-orange-500 via-yellow-500 to-orange-600 bg-clip-text text-transparent">
-            ⛏️ ClawdORE
-          </h1>
-          <p className="text-gray-400 text-lg">
-            ORE Mining Intelligence Network
-          </p>
-          <div className="mt-2 flex justify-center gap-4 text-sm">
-            <span className="text-green-400">● {stats.activeBots}/7 Bots Online</span>
-            <span className="text-orange-400">Round #{stats.currentRound}</span>
+        {/* Header with Timer */}
+        <div className="mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="text-center md:text-left">
+              <h1 className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-orange-500 via-yellow-500 to-orange-600 bg-clip-text text-transparent">
+                ⛏️ ClawdORE
+              </h1>
+              <p className="text-gray-400 text-lg">
+                ORE Mining Intelligence Network
+              </p>
+              <div className="mt-2 flex justify-center md:justify-start gap-4 text-sm">
+                <span className="text-green-400">● {stats.activeBots}/7 Bots Online</span>
+                <span className="text-orange-400">Round #{stats.currentRound}</span>
+              </div>
+            </div>
+            
+            {/* Round Timer */}
+            {currentRound && (
+              <div className="w-full md:w-64">
+                <RoundTimer 
+                  roundId={currentRound.round_id}
+                  timeRemaining={currentRound.time_remaining_secs}
+                  roundDuration={currentRound.round_duration_secs}
+                  updatedAt={currentRound.updated_at}
+                />
+              </div>
+            )}
           </div>
         </div>
 
