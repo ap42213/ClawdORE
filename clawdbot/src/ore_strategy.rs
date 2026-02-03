@@ -318,18 +318,54 @@ impl OreStrategyEngine {
         let mut best_score = 0.0f64;
         let mut reasoning = String::new();
 
-        // Find which counts have enough data (minimum 5 samples to start learning)
+        // Find which counts have enough data AND wins (minimum 5 samples to start learning)
         let mut counts_with_data = 0;
+        let mut counts_with_wins = 0;
         let min_samples = 5; // Lowered from 10 to learn faster
         
+        // First pass: check if ANY count has wins
+        for count in 1..=25u8 {
+            let stats = &self.square_count_performance[count as usize];
+            if stats.times_used >= min_samples as u32 {
+                counts_with_data += 1;
+                if stats.wins > 0 {
+                    counts_with_wins += 1;
+                }
+            }
+        }
+        
+        // If no counts have wins yet, use theoretical best (more squares = better odds)
+        if counts_with_wins == 0 {
+            // Use a balanced exploration: 5-7 squares is a good starting point
+            // More squares = higher win probability but lower ORE per square
+            let theoretical_best: u8 = {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                // Vary between 4-8 squares while exploring
+                ((now % 5) + 4) as u8
+            };
+            
+            return (theoretical_best, 0.0, format!(
+                "EXPLORING: No wins recorded yet. Trying {} squares (more squares = better odds)",
+                theoretical_best
+            ));
+        }
+        
         // Score each square count by: win_rate * ore_efficiency - cost
+        // Only consider counts with actual wins for scoring
         for count in 1..=25u8 {
             let stats = &self.square_count_performance[count as usize];
             if stats.times_used < min_samples as u32 {
                 continue; // Not enough data
             }
             
-            counts_with_data += 1;
+            // Skip counts with 0 wins - they haven't proven themselves
+            if stats.wins == 0 {
+                continue;
+            }
 
             // Win probability increases with more squares
             let base_win_prob = count as f64 / 25.0;
@@ -340,7 +376,7 @@ impl OreStrategyEngine {
             // ORE efficiency (more squares = smaller share when winning)
             let ore_efficiency = 1.0 / (count as f64).sqrt();
             
-            // Actual win rate from data
+            // Actual win rate from data (this is > 0 since we skip 0-win counts)
             let actual_win_rate = stats.win_rate;
             
             // Combined score: actual performance weighted by efficiency
@@ -350,16 +386,16 @@ impl OreStrategyEngine {
                 best_score = score;
                 best_count = count;
                 reasoning = format!(
-                    "LEARNED: {} squares = {:.1}% win rate, {:.2} efficiency, {} samples",
-                    count, actual_win_rate * 100.0, ore_efficiency, stats.times_used
+                    "LEARNED: {} squares = {:.1}% win rate ({} wins), {:.2} efficiency, {} samples",
+                    count, actual_win_rate * 100.0, stats.wins, ore_efficiency, stats.times_used
                 );
             }
         }
 
-        // If we have at least 1 count with good data, use it; otherwise explore
-        if counts_with_data < 1 || best_score == 0.0 {
+        // If somehow no count with wins was found (shouldn't happen), explore
+        if best_count == 0 {
             best_count = self.pick_exploration_count();
-            best_score = 0.0; // No confidence yet
+            best_score = 0.0;
             reasoning = format!(
                 "EXPLORING: Trying {} squares to gather data ({}+ samples needed per count)",
                 best_count, min_samples
