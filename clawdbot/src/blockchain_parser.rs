@@ -566,7 +566,7 @@ impl BlockchainParser {
         // Try to extract from inner instructions or return data
         if let Some(meta) = &tx.transaction.meta {
             // Check return data for ResetEvent
-            if let Some(return_data) = &meta.return_data {
+            if let solana_transaction_status::option_serializer::OptionSerializer::Some(return_data) = &meta.return_data {
                 if let solana_transaction_status::option_serializer::OptionSerializer::Some(data_str) = &return_data.data {
                     // Data is base64 encoded
                     if let Ok(data) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data_str.0) {
