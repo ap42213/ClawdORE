@@ -349,45 +349,39 @@ export default function Home() {
   }, [bots])
 
   return (
-    <main className="min-h-screen p-4 md:p-8 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-      <div className="max-w-7xl mx-auto">
+    <main className="dashboard">
+      <div className="dashboard-container">
         {/* Header with Timer */}
-        <div className="mb-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="text-center md:text-left">
-              <h1 className="text-4xl md:text-5xl font-bold mb-2 bg-gradient-to-r from-orange-500 via-yellow-500 to-orange-600 bg-clip-text text-transparent">
-                ⛏️ ClawdORE
-              </h1>
-              <p className="text-gray-400 text-lg">
-                ORE Mining Intelligence Network
-              </p>
-              <div className="mt-2 flex justify-center md:justify-start gap-4 text-sm">
-                <span className="text-green-400">● {stats.activeBots}/7 Bots Online</span>
-                <span className="text-orange-400">Round #{stats.currentRound}</span>
-              </div>
+        <header className="dashboard-header">
+          <div className="header-content">
+            <h1 className="dashboard-title">⛏️ ClawdORE</h1>
+            <p className="dashboard-subtitle">ORE Mining Intelligence Network</p>
+            <div className="header-status">
+              <span className="status-online">● {stats.activeBots}/7 Bots Online</span>
+              <span className="status-round">Round #{stats.currentRound}</span>
             </div>
-            
-            {/* Round Timer */}
-            {currentRound && (
-              <div className="w-full md:w-64">
-                <RoundTimer 
-                  roundId={currentRound.round_id}
-                  timeRemaining={currentRound.time_remaining_secs}
-                  roundDuration={currentRound.round_duration_secs}
-                  updatedAt={currentRound.updated_at}
-                />
-              </div>
-            )}
           </div>
-        </div>
+          
+          {/* Round Timer */}
+          {currentRound && (
+            <div className="timer-wrapper">
+              <RoundTimer 
+                roundId={currentRound.round_id}
+                timeRemaining={currentRound.time_remaining_secs}
+                roundDuration={currentRound.round_duration_secs}
+                updatedAt={currentRound.updated_at}
+              />
+            </div>
+          )}
+        </header>
 
         {/* Stats Row */}
         <Stats stats={stats} />
 
         {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div className="main-grid">
           {/* Left: Board Grid */}
-          <div className="lg:col-span-1">
+          <div className="grid-section">
             <BoardGrid 
               round={currentRound} 
               recommendation={recommendation}
@@ -395,28 +389,30 @@ export default function Home() {
           </div>
 
           {/* Center: Strategy Panel */}
-          <div className="lg:col-span-1">
+          <div className="grid-section">
             <StrategyPanel recommendation={recommendation} strategies={strategies} />
           </div>
 
           {/* Right: Terminal Feed */}
-          <div className="lg:col-span-1">
+          <div className="grid-section">
             <Terminal logs={logs} signals={signals} />
           </div>
         </div>
 
         {/* Bot Cards Grid */}
-        <h2 className="text-2xl font-bold mb-4 text-gray-200">🤖 Bot Network</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
-          {bots.map(bot => (
-            <BotCard key={bot.id} bot={bot} />
-          ))}
-        </div>
+        <section className="bots-section">
+          <h2 className="section-title">🤖 Bot Network</h2>
+          <div className="bots-grid">
+            {bots.map(bot => (
+              <BotCard key={bot.id} bot={bot} />
+            ))}
+          </div>
+        </section>
 
         {/* Footer */}
-        <div className="text-center text-gray-500 text-sm mt-8">
+        <footer className="dashboard-footer">
           <p>ClawdORE Intelligence Network • Powered by PostgreSQL</p>
-        </div>
+        </footer>
       </div>
     </main>
   )

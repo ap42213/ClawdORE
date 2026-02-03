@@ -7,9 +7,10 @@ interface RoundTimerProps {
   timeRemaining?: number
   roundDuration?: number
   updatedAt?: string
+  slotsRemaining?: number
 }
 
-export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60, updatedAt }: RoundTimerProps) {
+export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60, updatedAt, slotsRemaining }: RoundTimerProps) {
   const [displayTime, setDisplayTime] = useState(timeRemaining || 0)
   
   useEffect(() => {
@@ -39,75 +40,25 @@ export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60,
   
   const minutes = Math.floor(displayTime / 60)
   const seconds = displayTime % 60
+  const isUrgent = displayTime < 10
   
-  // Mining decision thresholds - push as close to 0 as possible
-  // Solana block time ~400ms, tx propagation ~500ms, signing ~100ms
-  // Realistically need ~1-2s buffer for safety
-  const TOO_LATE = 1.5        // High risk - may miss round
-  const SIGN_DEADLINE = 3     // Sign and submit NOW
-  const DECISION_TIME = 5     // Final decision window  
-  const PREPARE_TIME = 10     // Start analyzing
-  
-  // Progress percentage (inverted - fills as time passes)
+  // Progress percentage
   const progress = roundDuration > 0 ? ((roundDuration - displayTime) / roundDuration) * 100 : 0
-  
-  // Color based on mining decision windows
-  const getColor = () => {
-    if (displayTime <= TOO_LATE) return 'text-gray-500'
-    if (displayTime <= SIGN_DEADLINE) return 'text-red-400'
-    if (displayTime <= DECISION_TIME) return 'text-orange-400'
-    if (displayTime <= PREPARE_TIME) return 'text-yellow-400'
-    return 'text-green-400'
-  }
-  
-  const getBarColor = () => {
-    if (displayTime <= TOO_LATE) return 'bg-gray-600'
-    if (displayTime <= SIGN_DEADLINE) return 'bg-red-500'
-    if (displayTime <= DECISION_TIME) return 'bg-orange-500'
-    if (displayTime <= PREPARE_TIME) return 'bg-yellow-500'
-    return 'bg-green-500'
-  }
-  
-  const getMiningStatus = () => {
-    if (displayTime <= TOO_LATE && displayTime > 0) return { icon: '💀', text: 'TOO LATE', urgent: true }
-    if (displayTime <= SIGN_DEADLINE) return { icon: '🚨', text: 'SIGN NOW', urgent: true }
-    if (displayTime <= DECISION_TIME) return { icon: '⚡', text: 'DECIDE', urgent: true }
-    if (displayTime <= PREPARE_TIME) return { icon: '📊', text: 'ANALYZE', urgent: false }
-    return null
-  }
-  
-  const miningStatus = getMiningStatus()
 
   return (
-    <div className="bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700/50">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-2xl">⏱️</span>
-          <div>
-            <div className="text-xs text-gray-500 uppercase tracking-wide">Round #{roundId}</div>
-            <div className={`text-2xl font-mono font-bold ${getColor()}`}>
-              {minutes}:{seconds.toString().padStart(2, '0')}
-            </div>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-gray-500">Round Duration</div>
-          <div className="text-sm text-gray-400">~{roundDuration}s</div>
-        </div>
-      </div>
-      
-      {/* Progress bar */}
-      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+    <div className="timer-container">
+      <span className="timer-label">Round Ends In</span>
+      <span className={`timer-value ${isUrgent ? 'urgent' : ''}`}>
+        {minutes.toString().padStart(2, '0')}:{seconds.toString().padStart(2, '0')}
+      </span>
+      <div className="timer-progress">
         <div 
-          className={`h-full ${getBarColor()} transition-all duration-1000 ease-linear`}
+          className="timer-progress-bar"
           style={{ width: `${progress}%` }}
         />
       </div>
-      
-      {miningStatus && (
-        <div className={`mt-2 text-center text-xs ${miningStatus.urgent ? 'animate-pulse' : ''} ${getColor()}`}>
-          {miningStatus.icon} {miningStatus.text}
-        </div>
+      {slotsRemaining !== undefined && (
+        <span className="timer-slots">{slotsRemaining} slots remaining</span>
       )}
     </div>
   )
