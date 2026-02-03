@@ -448,6 +448,14 @@ impl OreStrategyEngine {
         // Fallback: return the least explored
         exploration_candidates[0].0
     }
+    
+    /// Get win rates by square count for AI context
+    pub fn get_square_count_win_rates(&self) -> Vec<(u8, f64)> {
+        self.square_count_performance.iter()
+            .filter(|s| s.times_used >= 5)  // Only counts with enough data
+            .map(|s| (s.count, s.win_rate))
+            .collect()
+    }
 
     /// Get top performing players to learn from
     pub fn get_top_performers(&self, limit: usize) -> Vec<&PlayerPerformance> {

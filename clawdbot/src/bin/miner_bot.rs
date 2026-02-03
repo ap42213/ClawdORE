@@ -1,4 +1,5 @@
 use clawdbot::{
+    ai_advisor::AIAdvisor,
     blockchain_parser::BlockchainParser,
     bot::BotStatus,
     client::OreClient,
@@ -85,6 +86,7 @@ struct SmartMinerBot {
     rpc_url: String,
     mode: String,           // "simulation", "live", or "executor"
     authority: Option<Pubkey>,  // For executor mode: whose automation to trigger
+    ai_advisor: AIAdvisor,  // AI-powered decision enhancement
     
     // Tracking
     rounds_played: u32,
@@ -107,6 +109,9 @@ impl SmartMinerBot {
         ore_strategy.min_wallet_sol = MIN_WALLET_SOL;
         ore_strategy.max_bet_per_round_sol = MAX_BET_PER_ROUND_SOL;
         
+        // Initialize AI advisor (uses OPENROUTER_API_KEY env var)
+        let ai_advisor = AIAdvisor::new();
+        
         Ok(Self {
             name: "SmartMiner".to_string(),
             status: Arc::new(RwLock::new(BotStatus::Idle)),
@@ -116,6 +121,7 @@ impl SmartMinerBot {
             rpc_url,
             mode,
             authority,
+            ai_advisor,
             rounds_played: 0,
             rounds_won: 0,
             total_deployed: 0,
@@ -446,14 +452,70 @@ impl SmartMinerBot {
                     }
                 }
             }
+            
+            // Get AI recommendation if enabled (only if we have time)
+            let ai_recommendation = if self.ai_advisor.is_enabled() && time_remaining > 8.0 {
+                // Get win rate stats for AI context
+                let win_stats: Vec<(u8, f64)> = self.ore_strategy.get_square_count_win_rates();
+                
+                self.ai_advisor.get_recommendation(
+                    current_round_id,
+                    &round.deployed,
+                    total_deployed as f64 / LAMPORTS_PER_SOL as f64,
+                    num_deployers,
+                    time_remaining,
+                    &consensus_squares,
+                    consensus_confidence,
+                    &win_stats,
+                    balance_sol,
+                ).await
+            } else {
+                None
+            };
+            
+            // Merge AI recommendation with consensus if available
+            let final_consensus_squares = if let Some(ref ai_rec) = ai_recommendation {
+                // If AI has high confidence, prefer AI squares; otherwise blend
+                if ai_rec.confidence > 0.7 && ai_rec.confidence > consensus_confidence {
+                    info!("🤖 Using AI recommendation (conf: {:.0}% > consensus {:.0}%)", 
+                        ai_rec.confidence * 100.0, consensus_confidence * 100.0);
+                    ai_rec.suggested_squares.clone()
+                } else if !consensus_squares.is_empty() {
+                    // Blend: use consensus but boost confidence if AI agrees
+                    let overlap: Vec<usize> = consensus_squares.iter()
+                        .filter(|s| ai_rec.suggested_squares.contains(s))
+                        .copied()
+                        .collect();
+                    if !overlap.is_empty() {
+                        info!("🤖 AI agrees on squares: {:?}", overlap);
+                    }
+                    consensus_squares.clone()
+                } else {
+                    ai_rec.suggested_squares.clone()
+                }
+            } else {
+                consensus_squares.clone()
+            };
+            
+            let final_confidence = if let Some(ref ai_rec) = ai_recommendation {
+                // Boost confidence if AI and consensus agree
+                let base = consensus_confidence.max(ai_rec.confidence);
+                if consensus_confidence > 0.0 && ai_rec.confidence > 0.5 {
+                    (base * 1.1).min(1.0)  // 10% boost for agreement
+                } else {
+                    base
+                }
+            } else {
+                consensus_confidence
+            };
 
             // Make deploy decision using learned strategy
             let decision = self.ore_strategy.make_deploy_decision(
                 balance,
                 &round.deployed,
                 num_deployers,
-                &consensus_squares,
-                consensus_confidence,
+                &final_consensus_squares,
+                final_confidence,
             );
 
             if decision.should_deploy {
