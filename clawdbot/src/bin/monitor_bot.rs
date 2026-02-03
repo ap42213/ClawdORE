@@ -155,11 +155,13 @@ async fn main() {
                     info!("{}", format!("🆕 NEW ROUND: {} → {}", last_round_id, current_round).green().bold());
                     
                     // Get winning square from completed round
-                    if let Ok(Some((winning_square, motherlode))) = parser.get_round_result(last_round_id) {
+                    // Note: ore_api returns 0-24, we convert to 1-25 for display
+                    if let Ok(Some((sq, motherlode))) = parser.get_round_result(last_round_id) {
+                        let winning_square = sq + 1; // Convert 0-24 to 1-25
                         info!("🎯 Round {} RESULT: Winning square {} {}", 
                             last_round_id, winning_square, if motherlode { "🎰 MOTHERLODE!" } else { "" });
                         
-                        // Update database with winning square
+                        // Update database with winning square (1-25)
                         #[cfg(feature = "database")]
                         if let Some(ref db) = db {
                             if let Err(e) = db.complete_round(

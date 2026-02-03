@@ -413,15 +413,17 @@ async fn main() {
                     // Get the winning square from the completed round's slot_hash
                     let winning_result = parser.get_round_result(last_round_id);
                     if let Ok(completed) = parser.get_round(last_round_id) {
+                        // Note: ore_api returns 0-24, we convert to 1-25 for display
                         let (winning_square, motherlode) = match winning_result {
                             Ok(Some((sq, ml))) => {
+                                let sq_display = sq + 1; // Convert 0-24 to 1-25
                                 info!("🎯 Round {} RESULT: Winning square {} {}", 
-                                    last_round_id, sq, if ml { "🎰 MOTHERLODE!" } else { "" });
-                                (sq, ml)
+                                    last_round_id, sq_display, if ml { "🎰 MOTHERLODE!" } else { "" });
+                                (sq_display, ml)
                             },
                             _ => {
                                 warn!("⚠️ Could not determine winning square for round {}", last_round_id);
-                                (0, false)
+                                (1, false) // Default to 1 instead of 0
                             }
                         };
                         
@@ -834,7 +836,8 @@ async fn main() {
                 for tx in &transactions {
                     if let Some(ref deploy) = tx.deploy_data {
                         let square_count = deploy.squares.len() as u8;
-                        let squares_u8: Vec<u8> = deploy.squares.iter().map(|&s| s as u8).collect();
+                        // Convert 0-24 to 1-25 for consistency with winning_square
+                        let squares_u8: Vec<u8> = deploy.squares.iter().map(|&s| (s + 1) as u8).collect();
                         
                         // Track in ore_strategy engine (in-memory)
                         ore_strategy.record_deploy(
@@ -853,7 +856,7 @@ async fn main() {
                             tx.slot,
                         );
                         
-                        // Track for win detection
+                        // Track for win detection (1-25)
                         round_deploys.insert(
                             tx.signer.clone(),
                             (deploy.amount_lamports, squares_u8.clone())
@@ -903,36 +906,39 @@ async fn main() {
                     }
                     
                     // Detect Reset transactions (round completions with winning squares)
+                    // Note: reset.winning_square is 0-24 from blockchain, convert to 1-25 for display
                     if let Some(ref reset) = tx.reset_data {
+                        let winning_sq_display = reset.winning_square + 1; // Convert to 1-25
+                        let winning_sq_idx = reset.winning_square as usize; // Keep 0-24 for array access
+                        
                         info!("{}", format!(
                             "🎯 ROUND {} COMPLETED! Winning square: {} {}",
                             reset.round_id,
-                            reset.winning_square,
+                            winning_sq_display,
                             if reset.motherlode { "🎰 MOTHERLODE!" } else { "" }
                         ).yellow().bold());
                         
                         // Update learning - this is the key data!
                         #[cfg(feature = "database")]
                         if let Some(ref db) = db {
-                            // Mark round as completed with winning square
+                            // Mark round as completed with winning square (1-25)
                             db.complete_round(
                                 reset.round_id as i64,
-                                reset.winning_square as i16,
+                                winning_sq_display as i16,
                                 reset.motherlode
                             ).await.ok();
                             
                             // Try to get the round's deployment data for learning
                             if let Ok(round) = parser.get_round(reset.round_id) {
                                 let deployed: [i64; 25] = round.deployed.map(|d| d as i64);
-                                db.update_square_stats(reset.winning_square as i16, &deployed).await.ok();
+                                db.update_square_stats(winning_sq_display as i16, &deployed).await.ok();
                                 
                                 // Record round conditions for competition analysis
                                 let total_deployed: i64 = deployed.iter().sum();
                                 let num_deployers = deployed.iter().filter(|&&d| d > 0).count() as i32;
                                 let squares_with_deploys = num_deployers as i16;
                                 let competition = CompetitionLevel::from_deployed(total_deployed as u64);
-                                let winning_sq = reset.winning_square as usize;
-                                let competition_on_square = if winning_sq < 25 { deployed[winning_sq] } else { 0 };
+                                let competition_on_square = if winning_sq_idx < 25 { deployed[winning_sq_idx] } else { 0 };
                                 
                                 // Determine if this could be a full ORE win
                                 let is_full_ore = (total_deployed as f64 / LAMPORTS_PER_SOL as f64) < 2.0;
@@ -953,7 +959,7 @@ async fn main() {
                                 info!("   • Total deployed: {:.4} SOL ({:?})", 
                                     total_deployed as f64 / LAMPORTS_PER_SOL as f64, competition);
                                 info!("   • Competition on square {}: {:.4} SOL", 
-                                    reset.winning_square, competition_on_square as f64 / LAMPORTS_PER_SOL as f64);
+                                    winning_sq_display, competition_on_square as f64 / LAMPORTS_PER_SOL as f64);
                                 info!("   • Full ORE: {} | Est. ORE: {:.2}", 
                                     if is_full_ore { "YES ✅" } else { "No" }, ore_earned);
                                 
@@ -970,7 +976,8 @@ async fn main() {
                                 
                                 let mut winners_found = 0;
                                 for (address, (amount, squares)) in deploys_to_check {
-                                    if squares.contains(&(reset.winning_square as u8)) {
+                                    // Use 1-25 for comparison (squares tracked as 1-25)
+                                    if squares.contains(&(winning_sq_display as u8)) {
                                         let num_squares = squares.len() as u8;
                                         let winner_share = if competition_on_square > 0 {
                                             *amount as f64 / competition_on_square as f64
@@ -986,11 +993,11 @@ async fn main() {
                                             amount_won as f64 / LAMPORTS_PER_SOL as f64,
                                             winner_share * 100.0);
                                         
-                                        // Record comprehensive win to database
+                                        // Record comprehensive win to database (1-25)
                                         db.record_win(
                                             reset.round_id as i64,
                                             address,
-                                            reset.winning_square as i16,
+                                            winning_sq_display as i16,
                                             *amount as i64,
                                             amount_won,
                                             &squares.iter().map(|&s| s as i32).collect::<Vec<_>>(),
@@ -1008,11 +1015,11 @@ async fn main() {
                                         // Update player win record
                                         db.record_player_win(address, amount_won).await.ok();
                                         
-                                        // Record in learning engine
+                                        // Record in learning engine (1-25)
                                         learning_engine.record_win(WinRecord {
                                             round_id: reset.round_id,
                                             winner_address: address.clone(),
-                                            winning_square: reset.winning_square as u8,
+                                            winning_square: winning_sq_display,
                                             amount_bet: *amount,
                                             amount_won: amount_won as u64,
                                             squares_bet: squares.clone(),
@@ -1040,7 +1047,7 @@ async fn main() {
                                 }
                             }
                             
-                            // Record strategy performance for each strategy
+                            // Record strategy performance for each strategy (1-25)
                             if let Ok(state) = db.get_state("current_strategies").await {
                                 if let Some(strategies) = state {
                                     if let Some(arr) = strategies.as_array() {
@@ -1057,7 +1064,7 @@ async fn main() {
                                                     name,
                                                     reset.round_id as i64,
                                                     &sq,
-                                                    reset.winning_square as i16,
+                                                    winning_sq_display as i16,
                                                     conf as f32
                                                 ).await.ok();
                                             }

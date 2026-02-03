@@ -217,15 +217,16 @@ async fn main() {
                     info!("{}", format!("🔄 Round {} completed, analyzing...", last_round_id).green());
                     
                     // Get winning square from completed round's slot_hash
-                    if let Ok(Some((winning_square, motherlode))) = parser.get_round_result(last_round_id) {
+                    // Note: ore_api returns 0-24 (array index), we convert to 1-25 for display/storage
+                    if let Ok(Some((winning_sq_idx, motherlode))) = parser.get_round_result(last_round_id) {
+                        let winning_square = winning_sq_idx + 1; // Convert to 1-25 for display
                         info!("🎯 Round {} RESULT: Winning square {} {}", 
                             last_round_id, winning_square, if motherlode { "🎰 MOTHERLODE!" } else { "" });
                         
                         // Get round data for analysis
                         if let Ok(round_data) = parser.get_round(last_round_id) {
                             let total_sol: u64 = round_data.deployed.iter().sum();
-                            let winning_sq = winning_square as usize;
-                            let competition_on_square = if winning_sq < 25 { round_data.deployed[winning_sq] } else { 0 };
+                            let competition_on_square = if (winning_sq_idx as usize) < 25 { round_data.deployed[winning_sq_idx as usize] } else { 0 };
                             let num_deployers = round_data.deployed.iter().filter(|&&d| d > 0).count() as u32;
                             let is_full_ore = total_sol < 2 * LAMPORTS_PER_SOL;
                             let ore_earned = if is_full_ore { 1.0 } else { 
@@ -239,7 +240,7 @@ async fn main() {
                                 winning_square, competition_on_square as f64 / LAMPORTS_PER_SOL as f64);
                             info!("      • Full ORE: {}", if is_full_ore { "YES ✅" } else { "No" });
                             
-                            // Find who won from tracked deploys
+                            // Find who won from tracked deploys (use 1-25 for comparison since we stored that way)
                             let mut winners_found = 0;
                             for (address, (amount, squares)) in &current_round_deploys {
                                 if squares.contains(&winning_square) {
@@ -339,20 +340,23 @@ async fn main() {
                         let total_round_sol = 0u64; // Would need to track per-round
                         let is_motherlode = false; // Would need to detect
                         
-                        // Record in learning engine
+                        // Convert 0-24 to 1-25 for consistency
+                        let squares_1_25: Vec<u8> = deploy.squares.iter().map(|&s| (s + 1) as u8).collect();
+                        
+                        // Record in learning engine (1-25)
                         learning_engine.record_deploy(
                             &tx.signer,
                             deploy.amount_lamports,
-                            &deploy.squares.iter().map(|&s| s as u8).collect::<Vec<_>>(),
+                            &squares_1_25,
                             total_round_sol,
                             is_motherlode,
                             tx.slot,
                         );
                         
-                        // Track for this round
+                        // Track for this round (1-25)
                         current_round_deploys.insert(
                             tx.signer.clone(),
-                            (deploy.amount_lamports, deploy.squares.iter().map(|&s| s as u8).collect())
+                            (deploy.amount_lamports, squares_1_25.clone())
                         );
                         
                         // Record to database
@@ -376,11 +380,15 @@ async fn main() {
                     }
                     
                     // Detect wins from Reset transactions
+                    // Note: reset.winning_square is 0-24 from blockchain, convert to 1-25 for display
                     if let Some(ref reset) = tx.reset_data {
+                        let winning_sq_display = reset.winning_square + 1; // Convert to 1-25
+                        let winning_sq_idx = reset.winning_square as usize; // Keep 0-24 for array access
+                        
                         info!("{}", format!(
                             "🎯 ROUND {} WINNER! Square: {} {}",
                             reset.round_id,
-                            reset.winning_square,
+                            winning_sq_display,
                             if reset.motherlode { "🎰 MOTHERLODE!" } else { "" }
                         ).yellow().bold());
                         
@@ -390,8 +398,7 @@ async fn main() {
                         // Get the round data to understand competition
                         if let Ok(round_data) = parser.get_round(reset.round_id) {
                             let total_sol: u64 = round_data.deployed.iter().sum();
-                            let winning_sq = reset.winning_square as usize;
-                            let competition_on_square = if winning_sq < 25 { round_data.deployed[winning_sq] } else { 0 };
+                            let competition_on_square = if winning_sq_idx < 25 { round_data.deployed[winning_sq_idx] } else { 0 };
                             let num_deployers = round_data.deployed.iter().filter(|&&d| d > 0).count() as u32;
                             
                             // Determine if this was a full ORE win
@@ -409,9 +416,9 @@ async fn main() {
                             info!("      • Estimated ORE: {:.2}", ore_earned);
                             info!("      • Full ORE: {}", if is_full_ore { "YES ✅" } else { "No" });
                             
-                            // Find who bet on the winning square from our tracked deploys
+                            // Find who bet on the winning square from our tracked deploys (using 1-25)
                             for (address, (amount, squares)) in &current_round_deploys {
-                                if squares.contains(&(reset.winning_square as u8)) {
+                                if squares.contains(&winning_sq_display) {
                                     let num_squares = squares.len() as u8;
                                     let winner_share = if competition_on_square > 0 {
                                         *amount as f64 / competition_on_square as f64
@@ -427,11 +434,11 @@ async fn main() {
                                         winner_share * 100.0
                                     ).green());
                                     
-                                    // Create win record
+                                    // Create win record (using 1-25 for storage)
                                     let win = WinRecord {
                                         round_id: reset.round_id,
                                         winner_address: address.clone(),
-                                        winning_square: reset.winning_square as u8,
+                                        winning_square: winning_sq_display,
                                         amount_bet: *amount,
                                         amount_won: (competition_on_square as f64 * winner_share) as u64,
                                         squares_bet: squares.clone(),
@@ -450,13 +457,13 @@ async fn main() {
                                     // Record in learning engine
                                     learning_engine.record_win(win.clone());
                                     
-                                    // Record in database
+                                    // Record in database (1-25)
                                     #[cfg(feature = "database")]
                                     if let Some(ref db) = db {
                                         db.record_win(
                                             reset.round_id as i64,
                                             address,
-                                            reset.winning_square as i16,
+                                            winning_sq_display as i16,
                                             *amount as i64,
                                             (competition_on_square as f64 * winner_share) as i64,
                                             &squares.iter().map(|&s| s as i32).collect::<Vec<_>>(),
