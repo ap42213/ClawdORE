@@ -329,11 +329,11 @@ impl OreStrategyEngine {
     }
     
     /// Pick a square count to explore (one we have less data on)
-    /// Prioritizes counts we've tried least, with slight randomness
+    /// Can explore ANY count from 1-25, prioritizes least-sampled
     fn pick_exploration_count(&self) -> u8 {
         use std::time::{SystemTime, UNIX_EPOCH};
         
-        // Find counts with least samples (exploring the unknown)
+        // All counts from 1-25 are valid exploration targets
         let mut exploration_candidates: Vec<(u8, u32)> = (1..=25u8)
             .map(|count| {
                 let samples = self.square_count_performance[count as usize].times_used;
@@ -341,23 +341,34 @@ impl OreStrategyEngine {
             })
             .collect();
         
-        // Sort by fewest samples first
+        // Sort by fewest samples first (explore the unknown)
         exploration_candidates.sort_by_key(|(_count, samples)| *samples);
         
-        // Pick from the 5 least-explored counts, with some randomness
-        let candidates: Vec<u8> = exploration_candidates.iter()
-            .take(5)
-            .map(|(count, _)| *count)
-            .collect();
-        
-        // Simple random selection using timestamp
+        // Weight selection toward less-explored counts, but allow any
+        // Use inverse weighting: fewer samples = higher chance
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        let idx = (now as usize) % candidates.len();
         
-        candidates[idx]
+        // Pick from ALL 25 counts, weighted by exploration need
+        // Lower samples = picked more often
+        let total_inverse: u32 = exploration_candidates.iter()
+            .map(|(_, samples)| 1000 / (samples + 1)) // +1 to avoid division by zero
+            .sum();
+        
+        let random_val = (now as u32) % total_inverse.max(1);
+        let mut cumulative = 0u32;
+        
+        for (count, samples) in &exploration_candidates {
+            cumulative += 1000 / (samples + 1);
+            if cumulative >= random_val {
+                return *count;
+            }
+        }
+        
+        // Fallback: return the least explored
+        exploration_candidates[0].0
     }
 
     /// Get top performing players to learn from
