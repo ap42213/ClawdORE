@@ -129,13 +129,21 @@ export default function Home() {
       const signalsRes = await fetch(`${API_URL}/api/signals?limit=50`)
       if (signalsRes.ok) {
         const data = await signalsRes.json()
-        setSignals(data.signals || [])
+        const signalsList = data.signals || []
+        setSignals(signalsList)
+        
+        // Log for debugging
+        if (signalsList.length > 0) {
+          console.log('Signals received:', signalsList.length)
+        }
         
         // Update bot statuses based on heartbeats
         const now = new Date()
-        const heartbeats = (data.signals || []).filter((s: Signal) => 
+        const heartbeats = signalsList.filter((s: Signal) => 
           s.signal_type.toLowerCase() === 'heartbeat'
         )
+        
+        console.log('Heartbeats found:', heartbeats.length)
         
         setBots(prev => prev.map(bot => {
           const lastHb = heartbeats.find((h: Signal) => 
@@ -214,7 +222,8 @@ export default function Home() {
       }
 
     } catch (error) {
-      // Silent fail - API might not be ready yet
+      console.error('Fetch error:', error)
+      setLogs(prev => [...prev.slice(-50), `❌ Error: ${error}`])
     }
   }, [API_URL])
 
