@@ -413,6 +413,18 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          {/* ORE Selector Tool */}
+          <div className="mt-4">
+            <a 
+              href="/ore-selector.html" 
+              target="_blank"
+              className="block w-full p-3 bg-yellow-900/30 rounded-lg border border-yellow-600/50 hover:bg-yellow-900/50 transition-colors text-center"
+            >
+              <div className="text-yellow-400 font-bold text-sm">⚡ ORE Selector</div>
+              <div className="text-xs text-gray-400 mt-1">Auto-select blocks on ore.supply</div>
+            </a>
+          </div>
           
           <div className="mt-6">
             <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-3">Legend</h2>

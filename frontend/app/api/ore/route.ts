@@ -120,6 +120,24 @@ export async function GET() {
       }
     }
     
+    // Generate recommended blocks (empty squares first, then by lowest deployment)
+    // Use 1-based indexing (1-25)
+    const squaresWithDeployment = deployed.map((d, i) => ({ 
+      square: i + 1,  // 1-based 
+      amount: d 
+    }))
+    
+    // Sort by deployment amount (lowest first = better EV if pool is sparse)
+    const sorted = [...squaresWithDeployment].sort((a, b) => a.amount - b.amount)
+    
+    // Recommend 5 blocks with lowest deployment
+    const recommendedBlocks = sorted.slice(0, 5).map(s => s.square)
+    
+    // Empty squares (best for exclusive wins)
+    const emptySquares = squaresWithDeployment
+      .filter(s => s.amount === 0)
+      .map(s => s.square)
+    
     return NextResponse.json({
       round_id: roundId,
       start_slot: startSlot,
@@ -132,6 +150,8 @@ export async function GET() {
       active_squares: deployed.filter(d => d > 0).length,
       last_winning_square: lastWinningSquare,
       last_round_id: lastRoundId,
+      recommended_blocks: recommendedBlocks,
+      empty_squares: emptySquares,
     })
   } catch (error) {
     console.error('ORE fetch error:', error)
