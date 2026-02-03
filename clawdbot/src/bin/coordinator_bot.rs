@@ -336,19 +336,90 @@ async fn main() {
                         previous_round_deploys.len(), last_round_id);
                     
                     // Try to get the completed round data and add to strategy engine
+                    // Get the winning square from the completed round's slot_hash
+                    let winning_result = parser.get_round_result(last_round_id);
                     if let Ok(completed) = parser.get_round(last_round_id) {
-                        // TODO: Get actual winning square from completed round
-                        // For now, we'll track the deployment pattern
+                        let (winning_square, motherlode) = match winning_result {
+                            Ok(Some((sq, ml))) => {
+                                info!("🎯 Round {} RESULT: Winning square {} {}", 
+                                    last_round_id, sq, if ml { "🎰 MOTHERLODE!" } else { "" });
+                                (sq, ml)
+                            },
+                            _ => {
+                                warn!("⚠️ Could not determine winning square for round {}", last_round_id);
+                                (0, false)
+                            }
+                        };
+                        
                         let round_history = RoundHistory {
                             round_id: last_round_id,
-                            winning_square: 0, // Would need to detect from blockchain
+                            winning_square,
                             deployed: completed.deployed,
                             total_pot: completed.deployed.iter().sum(),
-                            motherlode: false,
+                            motherlode,
                             timestamp: None,
                         };
-                        strategy_engine.add_round(round_history);
-                        info!("📚 Added round {} to strategy history", last_round_id);
+                        strategy_engine.add_round(round_history.clone());
+                        ore_strategy_engine.record_round(&round_history.deployed, round_history.winning_square);
+                        info!("📚 Added round {} to strategy history (winning square: {})", 
+                            last_round_id, winning_square);
+                        
+                        // LEARNING: Check which tracked deploys hit the winning square
+                        let winning_sq_usize = winning_square as usize;
+                        let total_deployed: u64 = completed.deployed.iter().sum();
+                        let is_full_ore = (total_deployed as f64 / 1_000_000_000.0) < 2.0;
+                        
+                        let mut winners_found = 0;
+                        for (address, (deploy_amount, squares)) in &previous_round_deploys {
+                            if squares.contains(&winning_square) {
+                                // This player won!
+                                winners_found += 1;
+                                let num_squares = squares.len() as u8;
+                                
+                                // Record win in learning engine
+                                learning_engine.record_win(WinRecord {
+                                    round_id: last_round_id,
+                                    address: address.clone(),
+                                    winning_square,
+                                    squares_bet: squares.clone(),
+                                    amount_bet: *deploy_amount,
+                                    is_full_ore,
+                                    motherlode,
+                                    timestamp: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs() as i64,
+                                });
+                                
+                                // Record in ore_strategy_engine
+                                let winnings = if winning_sq_usize < 25 {
+                                    total_deployed.saturating_sub(completed.deployed[winning_sq_usize])
+                                } else { 0 };
+                                ore_strategy_engine.record_win(
+                                    address, 
+                                    winnings * (*deploy_amount) / completed.deployed[winning_sq_usize].max(1),
+                                    if is_full_ore { 1.0 } else { 0.5 },
+                                    num_squares
+                                );
+                                
+                                // Record in database
+                                #[cfg(feature = "database")]
+                                if let Some(ref db) = db {
+                                    db.record_win(
+                                        address,
+                                        last_round_id as i64,
+                                        winning_square as i16,
+                                        *deploy_amount as i64,
+                                        is_full_ore,
+                                    ).await.ok();
+                                }
+                            }
+                        }
+                        
+                        if winners_found > 0 {
+                            info!("🏆 Detected {} winners on square {} (full ORE: {})", 
+                                winners_found, winning_square, is_full_ore);
+                        }
                     }
                     
                     #[cfg(feature = "database")]

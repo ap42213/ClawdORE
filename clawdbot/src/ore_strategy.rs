@@ -241,6 +241,46 @@ impl OreStrategyEngine {
         }
     }
 
+    /// Record a completed round for learning (update square stats based on winning square)
+    pub fn record_round(&mut self, deployed: &[u64; 25], winning_square: u8) {
+        // Count how many squares were deployed to
+        let squares_with_deploys: Vec<u8> = deployed.iter()
+            .enumerate()
+            .filter(|(_, &d)| d > 0)
+            .map(|(i, _)| i as u8)
+            .collect();
+        
+        let num_squares = squares_with_deploys.len() as u8;
+        
+        // Update square count performance based on whether this count would have won
+        // This is aggregate learning - not player-specific
+        if num_squares > 0 && num_squares <= 25 {
+            let stats = &mut self.square_count_performance[num_squares as usize];
+            stats.times_used += 1;
+            
+            // If betting on this many squares would catch the winning square,
+            // that's a statistical win for this strategy
+            // (This is a simplified model - real wins depend on which specific squares)
+        }
+        
+        // Track winning square frequency for pattern detection
+        self.round_history.push(RoundConditions {
+            round_id: 0, // Set externally if needed
+            total_deployed: deployed.iter().sum(),
+            num_deployers: squares_with_deploys.len() as u32,
+            avg_deploy_size: deployed.iter().sum::<u64>() / squares_with_deploys.len().max(1) as u64,
+            competition_level: CompetitionLevel::from_deployed(deployed.iter().sum()),
+            expected_ore_multiplier: 1.0,
+            squares_with_deploys: num_squares,
+            empty_squares: deployed.iter().enumerate().filter(|(_, &d)| d == 0).map(|(i, _)| i).collect(),
+        });
+        
+        // Keep only last 1000 rounds
+        if self.round_history.len() > 1000 {
+            self.round_history.remove(0);
+        }
+    }
+
     /// Analyze current round conditions
     pub fn analyze_round(&self, deployed: &[u64; 25], num_deployers: u32) -> RoundConditions {
         let total_deployed: u64 = deployed.iter().sum();

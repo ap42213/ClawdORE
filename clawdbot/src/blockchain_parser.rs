@@ -701,6 +701,35 @@ impl BlockchainParser {
         Ok(*round)
     }
 
+    /// Get winning square for a completed round
+    /// The winning square is computed from the round's slot_hash using RNG
+    pub fn get_round_winning_square(&self, round_id: u64) -> Result<Option<u8>> {
+        let round = self.get_round(round_id)?;
+        
+        // Use the Round's rng() and winning_square() methods
+        // rng() returns None if slot_hash is unset (round not completed)
+        if let Some(rng) = round.rng() {
+            let winning_sq = round.winning_square(rng);
+            Ok(Some(winning_sq as u8))
+        } else {
+            // Round not completed yet - no winning square
+            Ok(None)
+        }
+    }
+
+    /// Get winning square and motherlode status for a completed round
+    pub fn get_round_result(&self, round_id: u64) -> Result<Option<(u8, bool)>> {
+        let round = self.get_round(round_id)?;
+        
+        if let Some(rng) = round.rng() {
+            let winning_sq = round.winning_square(rng) as u8;
+            let motherlode = round.did_hit_motherlode(rng);
+            Ok(Some((winning_sq, motherlode)))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Get treasury state
     pub fn get_treasury(&self) -> Result<Treasury> {
         let (treasury_address, _) = ore_api::state::treasury_pda();
