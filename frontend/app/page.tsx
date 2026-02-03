@@ -6,7 +6,7 @@ interface LogEntry {
   id: number
   timestamp: string
   bot: string
-  type: 'info' | 'decision' | 'action' | 'win' | 'error' | 'ai'
+  type: 'info' | 'decision' | 'action' | 'win' | 'loss' | 'error' | 'ai'
   message: string
 }
 
@@ -14,6 +14,14 @@ interface BotStatus {
   name: string
   status: 'online' | 'offline' | 'thinking'
   lastSeen: string
+}
+
+interface RoundResult {
+  round_id: number
+  winning_square: number
+  our_picks: number[]
+  hit: boolean
+  ore_earned: number
 }
 
 const BOT_COLORS: Record<string, string> = {
@@ -27,6 +35,7 @@ const BOT_COLORS: Record<string, string> = {
   'AI-ADVISORE': '#00d4aa',
   'SYSTEM': '#64748b',
   'ORE': '#ff6b35',
+  'RESULT': '#fbbf24',
 }
 
 export default function Home() {
@@ -42,9 +51,12 @@ export default function Home() {
   ])
   const [currentRound, setCurrentRound] = useState<number>(0)
   const [connected, setConnected] = useState(false)
-  const [stats, setStats] = useState({ wins: 0, rounds: 0, oreEarned: 0 })
+  const [stats, setStats] = useState({ wins: 0, losses: 0, total: 0, winRate: '0', oreEarned: 0 })
+  const [lastWinner, setLastWinner] = useState<{ round_id: number, winning_square: number } | null>(null)
+  const [recentResults, setRecentResults] = useState<RoundResult[]>([])
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
+  const seenRoundsRef = useRef<Set<number>>(new Set())
 
   const addLog = (bot: string, type: LogEntry['type'], message: string) => {
     const entry: LogEntry = {
@@ -176,10 +188,54 @@ export default function Home() {
         const statsRes = await fetch('/api/stats')
         if (statsRes.ok) {
           const statsData = await statsRes.json()
-          setStats({
-            wins: statsData.wins || 0,
-            rounds: statsData.rounds || 0,
+          setStats(prev => ({
+            ...prev,
             oreEarned: statsData.ore_earned || 0,
+          }))
+        }
+
+        // Fetch round results (win/loss vs winning square)
+        const resultsRes = await fetch('/api/results')
+        if (resultsRes.ok) {
+          const resultsData = await resultsRes.json()
+          
+          // Update tally
+          setStats(prev => ({
+            ...prev,
+            wins: resultsData.tally?.wins || 0,
+            losses: resultsData.tally?.losses || 0,
+            total: resultsData.tally?.total || 0,
+            winRate: resultsData.tally?.win_rate || '0',
+          }))
+
+          // Update last winner
+          if (resultsData.last_winner) {
+            setLastWinner(resultsData.last_winner)
+          }
+
+          // Log new round results
+          const results = resultsData.results || []
+          setRecentResults(results)
+          
+          results.slice(0, 10).forEach((result: RoundResult) => {
+            if (!seenRoundsRef.current.has(result.round_id)) {
+              seenRoundsRef.current.add(result.round_id)
+              
+              // Log the winning square from ORE
+              addLog('ORE', 'info', 
+                `🎰 Round #${result.round_id} winner: SQUARE ${result.winning_square}`)
+              
+              // Log our result
+              if (result.our_picks?.length > 0) {
+                if (result.hit) {
+                  addLog('RESULT', 'win', 
+                    `✅ WIN! We picked [${result.our_picks.join(', ')}] - winner was ${result.winning_square} → +${result.ore_earned.toFixed(2)} ORE`)
+                } else {
+                  addLog('RESULT', 'loss', 
+                    `❌ LOSS - We picked [${result.our_picks.join(', ')}] - winner was ${result.winning_square}`)
+                }
+              }
+            }
           })
         }
       } catch (e) {
@@ -206,6 +262,7 @@ export default function Home() {
   const getTypeStyle = (type: LogEntry['type']) => {
     switch (type) {
       case 'win': return 'text-green-400 font-bold'
+      case 'loss': return 'text-red-400 font-bold'
       case 'error': return 'text-red-400'
       case 'action': return 'text-blue-400'
       case 'decision': return 'text-yellow-400'
@@ -268,12 +325,20 @@ export default function Home() {
               <div className="flex justify-between">
                 <span className="text-gray-500">Win Rate</span>
                 <span className="text-green-400 font-bold">
-                  {stats.rounds > 0 ? ((stats.wins / stats.rounds) * 100).toFixed(1) : 0}%
+                  {stats.winRate}%
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Wins</span>
-                <span className="text-white">{stats.wins}/{stats.rounds}</span>
+                <span className="text-gray-500">Record</span>
+                <span>
+                  <span className="text-green-400">{stats.wins}W</span>
+                  <span className="text-gray-600"> / </span>
+                  <span className="text-red-400">{stats.losses}L</span>
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Rounds</span>
+                <span className="text-white">{stats.total}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">ORE Earned</span>
@@ -281,15 +346,31 @@ export default function Home() {
               </div>
             </div>
           </div>
+
+          {/* Last Winner */}
+          {lastWinner && (
+            <div className="mt-4 p-3 bg-orange-900/20 rounded-lg border border-orange-800/50">
+              <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Last Winner</h2>
+              <div className="text-center">
+                <div className="text-2xl font-bold" style={{ color: '#ff6b35' }}>
+                  □ {lastWinner.winning_square}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Round #{lastWinner.round_id}
+                </div>
+              </div>
+            </div>
+          )}
           
           <div className="mt-6">
             <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-3">Legend</h2>
             <div className="space-y-1 text-xs">
+              <div className="text-green-400">✅ Win</div>
+              <div className="text-red-400">❌ Loss</div>
               <div className="text-yellow-400">🎯 Decision</div>
               <div className="text-blue-400">📤 Action</div>
-              <div className="text-green-400">🏆 Win</div>
               <div className="text-cyan-400">🤖 AI Insight</div>
-              <div style={{ color: '#ff6b35' }}>⛏️ ORE Chain</div>
+              <div style={{ color: '#ff6b35' }}>🎰 ORE Winner</div>
             </div>
           </div>
         </aside>
