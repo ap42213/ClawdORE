@@ -513,11 +513,15 @@ async fn main() {
                     }
 
                     // Run strategy analysis
+                    // Get optimal square count from learning engine (can be 1-25)
+                    let (optimal_count, _, count_reasoning) = ore_strategy.get_optimal_square_count();
                     let recommendations = strategy_engine.get_recommendations(&current.deployed);
-                    let consensus = strategy_engine.get_consensus_recommendation(&current.deployed);
+                    // Use the learned optimal count for consensus, not hardcoded 5
+                    let consensus = strategy_engine.get_consensus_recommendation_n(&current.deployed, optimal_count as usize);
                     
                     // Display top strategies
                     info!("\n{}", "═══ STRATEGY ANALYSIS ═══".yellow().bold());
+                    info!("🎯 Optimal square count: {} ({})", optimal_count, count_reasoning);
                     
                     for (i, rec) in recommendations.iter().take(5).enumerate() {
                         if rec.confidence > 0.2 && !rec.squares.is_empty() {
@@ -597,7 +601,9 @@ async fn main() {
                         db.set_state("consensus_recommendation", serde_json::json!({
                             "squares": consensus.squares,
                             "weights": consensus.weights,
-                            "confidence": consensus.confidence
+                            "confidence": consensus.confidence,
+                            "optimal_count": optimal_count,
+                            "count_reasoning": count_reasoning
                         })).await.ok();
                     }
                     

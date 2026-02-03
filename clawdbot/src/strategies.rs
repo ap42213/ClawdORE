@@ -724,8 +724,14 @@ impl StrategyEngine {
         }
     }
 
-    /// Get best overall recommendation (consensus)
+    /// Get best overall recommendation (consensus) with configurable square count
     pub fn get_consensus_recommendation(&self, current_deployed: &[u64; 25]) -> StrategyRecommendation {
+        self.get_consensus_recommendation_n(current_deployed, 5)
+    }
+    
+    /// Get consensus recommendation for N squares (1-25)
+    pub fn get_consensus_recommendation_n(&self, current_deployed: &[u64; 25], num_squares: usize) -> StrategyRecommendation {
+        let num_squares = num_squares.max(1).min(25);
         let recs = self.get_recommendations(current_deployed);
         
         // Weight squares by appearing in multiple strategies
@@ -746,19 +752,23 @@ impl StrategyEngine {
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let top_squares: Vec<usize> = scored.iter().take(5).map(|(i, _)| *i).collect();
-        let total_score: f64 = scored.iter().take(5).map(|(_, s)| s).sum();
-        let weights: Vec<f64> = scored.iter().take(5).map(|(_, s)| s / total_score).collect();
+        let top_squares: Vec<usize> = scored.iter().take(num_squares).map(|(i, _)| *i).collect();
+        let total_score: f64 = scored.iter().take(num_squares).map(|(_, s)| s).sum();
+        let weights: Vec<f64> = if total_score > 0.0 {
+            scored.iter().take(num_squares).map(|(_, s)| s / total_score).collect()
+        } else {
+            vec![1.0 / num_squares as f64; top_squares.len()]
+        };
 
-        let confidence = (total_score / 5.0).min(0.85);
+        let confidence = (total_score / num_squares as f64).min(0.85);
 
         StrategyRecommendation {
-            strategy_name: "Consensus".to_string(),
+            strategy_name: format!("Consensus-{}", num_squares),
             squares: top_squares,
             weights,
             confidence,
             expected_roi: 0.2,
-            reasoning: "Weighted consensus across all strategies".to_string(),
+            reasoning: format!("Weighted consensus across all strategies ({} squares)", num_squares),
         }
     }
 }
