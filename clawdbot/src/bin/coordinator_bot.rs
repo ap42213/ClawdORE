@@ -488,6 +488,28 @@ async fn main() {
                         if let Err(e) = db.upsert_round(&db_round).await {
                             warn!("Failed to store round: {}", e);
                         }
+                        
+                        // Update monitor_status with timing info for frontend
+                        let slots_per_second: f64 = 2.5; // ~400ms per slot
+                        let current_slot = parser.get_slot().unwrap_or(board.start_slot);
+                        let round_duration_slots = board.end_slot.saturating_sub(board.start_slot);
+                        let round_duration_secs = (round_duration_slots as f64 / slots_per_second) as u64;
+                        let slots_remaining = board.end_slot.saturating_sub(current_slot);
+                        let time_remaining_secs = (slots_remaining as f64 / slots_per_second) as u64;
+                        
+                        db.set_state("monitor_status", serde_json::json!({
+                            "round_id": current_round,
+                            "total_deployed": total_deployed,
+                            "active_squares": current.deployed.iter().filter(|&&d| d > 0).count(),
+                            "start_slot": board.start_slot,
+                            "end_slot": board.end_slot,
+                            "current_slot": current_slot,
+                            "round_duration_secs": round_duration_secs,
+                            "time_remaining_secs": time_remaining_secs,
+                            "slots_remaining": slots_remaining,
+                            "deployed_squares": current.deployed.iter().map(|&d| d).collect::<Vec<_>>(),
+                            "updated_at": chrono::Utc::now().to_rfc3339(),
+                        })).await.ok();
                     }
 
                     // Run strategy analysis

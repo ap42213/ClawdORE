@@ -191,10 +191,10 @@ async fn main() {
                         };
                         let round_duration_secs = (round_duration_slots as f64 / slots_per_second) as u64;
                         
-                        // Get current slot estimate (approximate - we use the board's view)
-                        let current_slot_estimate = board.start_slot + (round.deployed.iter().filter(|&&d| d > 0).count() as u64 * 2);
-                        let slots_remaining = if board.end_slot > current_slot_estimate {
-                            board.end_slot.saturating_sub(current_slot_estimate)
+                        // Get ACTUAL current slot from blockchain
+                        let current_slot = parser.get_slot().unwrap_or(board.start_slot);
+                        let slots_remaining = if board.end_slot > current_slot {
+                            board.end_slot.saturating_sub(current_slot)
                         } else {
                             0
                         };
