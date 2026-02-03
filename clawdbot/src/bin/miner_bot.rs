@@ -435,26 +435,31 @@ impl SmartMinerBot {
                 competition);
             info!("⏱️  Time remaining: {:.1}s", time_remaining);
             
-            // Get consensus recommendation from coordinator (via database)
-            let mut consensus_squares: Vec<usize> = Vec::new();
-            let mut consensus_confidence: f64 = 0.0;
+            // Get consensus recommendation from coordinator (THE SINGLE SOURCE OF TRUTH)
+            let mut coordinator_squares: Vec<usize> = Vec::new();
+            let mut coordinator_confidence: f64 = 0.0;
+            let mut coordinator_optimal_count: u8 = 0;
             
             #[cfg(feature = "database")]
             if is_database_available() {
                 if let Ok(db) = SharedDb::connect().await {
                     if let Ok(Some(rec)) = db.get_state("consensus_recommendation").await {
                         if let Some(squares) = rec["squares"].as_array() {
-                            consensus_squares = squares.iter()
+                            coordinator_squares = squares.iter()
                                 .filter_map(|s| s.as_u64().map(|n| n as usize))
                                 .collect();
                         }
-                        consensus_confidence = rec["confidence"].as_f64().unwrap_or(0.0);
+                        coordinator_confidence = rec["confidence"].as_f64().unwrap_or(0.0);
+                        coordinator_optimal_count = rec["optimal_count"].as_u64().unwrap_or(5) as u8;
+                        
+                        info!("📡 Coordinator decision: {:?} ({} squares, {:.0}% confidence)", 
+                            coordinator_squares, coordinator_optimal_count, coordinator_confidence * 100.0);
                     }
                 }
             }
             
-            // Get AI recommendation if enabled (only if we have time)
-            let ai_recommendation = if self.ai_advisor.is_enabled() && time_remaining > 8.0 {
+            // Get AI recommendation if enabled (only if we have time and low coordinator confidence)
+            let ai_recommendation = if self.ai_advisor.is_enabled() && time_remaining > 8.0 && coordinator_confidence < 0.7 {
                 // Get win rate stats for AI context
                 let win_stats: Vec<(u8, f64)> = self.ore_strategy.get_square_count_win_rates();
                 
@@ -464,8 +469,8 @@ impl SmartMinerBot {
                     total_deployed as f64 / LAMPORTS_PER_SOL as f64,
                     num_deployers,
                     time_remaining,
-                    &consensus_squares,
-                    consensus_confidence,
+                    &coordinator_squares,
+                    coordinator_confidence,
                     &win_stats,
                     balance_sol,
                 ).await
@@ -473,48 +478,47 @@ impl SmartMinerBot {
                 None
             };
             
-            // Merge AI recommendation with consensus if available
-            let final_consensus_squares = if let Some(ref ai_rec) = ai_recommendation {
-                // If AI has high confidence, prefer AI squares; otherwise blend
-                if ai_rec.confidence > 0.7 && ai_rec.confidence > consensus_confidence {
-                    info!("🤖 Using AI recommendation (conf: {:.0}% > consensus {:.0}%)", 
-                        ai_rec.confidence * 100.0, consensus_confidence * 100.0);
+            // COORDINATOR IS THE DECIDER - only override if AI has MUCH higher confidence
+            let final_squares = if let Some(ref ai_rec) = ai_recommendation {
+                if ai_rec.confidence > 0.85 && ai_rec.confidence > coordinator_confidence + 0.2 {
+                    // AI is very confident and significantly more confident than coordinator
+                    info!("🤖 AI override! (conf: {:.0}% >> coordinator {:.0}%)", 
+                        ai_rec.confidence * 100.0, coordinator_confidence * 100.0);
                     ai_rec.suggested_squares.clone()
-                } else if !consensus_squares.is_empty() {
-                    // Blend: use consensus but boost confidence if AI agrees
-                    let overlap: Vec<usize> = consensus_squares.iter()
-                        .filter(|s| ai_rec.suggested_squares.contains(s))
-                        .copied()
-                        .collect();
-                    if !overlap.is_empty() {
-                        info!("🤖 AI agrees on squares: {:?}", overlap);
-                    }
-                    consensus_squares.clone()
                 } else {
-                    ai_rec.suggested_squares.clone()
+                    // Use coordinator decision (the single source of truth)
+                    if !ai_rec.suggested_squares.is_empty() {
+                        let overlap: Vec<usize> = coordinator_squares.iter()
+                            .filter(|s| ai_rec.suggested_squares.contains(s))
+                            .copied()
+                            .collect();
+                        if !overlap.is_empty() {
+                            info!("🤖 AI agrees on squares: {:?}", overlap);
+                        }
+                    }
+                    coordinator_squares.clone()
                 }
             } else {
-                consensus_squares.clone()
+                coordinator_squares.clone()
             };
             
             let final_confidence = if let Some(ref ai_rec) = ai_recommendation {
-                // Boost confidence if AI and consensus agree
-                let base = consensus_confidence.max(ai_rec.confidence);
-                if consensus_confidence > 0.0 && ai_rec.confidence > 0.5 {
-                    (base * 1.1).min(1.0)  // 10% boost for agreement
+                // Boost confidence if AI agrees with coordinator
+                if coordinator_confidence > 0.0 && ai_rec.confidence > 0.5 {
+                    (coordinator_confidence * 1.1).min(1.0)
                 } else {
-                    base
+                    coordinator_confidence
                 }
             } else {
-                consensus_confidence
+                coordinator_confidence
             };
 
-            // Make deploy decision using learned strategy
+            // Execute coordinator's decision (miner just executes, doesn't decide)
             let decision = self.ore_strategy.make_deploy_decision(
                 balance,
                 &round.deployed,
                 num_deployers,
-                &final_consensus_squares,
+                &final_squares,
                 final_confidence,
             );
 

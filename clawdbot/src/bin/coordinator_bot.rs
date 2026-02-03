@@ -1,14 +1,20 @@
 use clawdbot::{
+    ai_advisor::AIAdvisor,
     blockchain_parser::{BlockchainParser, OreInstructionType},
     config::BotConfig,
     db::{is_database_available, Signal, SignalType},
     strategies::{StrategyEngine, RoundHistory, StrategyRecommendation},
-    ore_strategy::{OreStrategyEngine, CompetitionLevel},
+    ore_strategy::{OreStrategyEngine, CompetitionLevel, DeployDecision},
     learning_engine::{LearningEngine, WinRecord},
 };
 use colored::*;
 use log::{error, info, warn};
-use solana_sdk::signature::{read_keypair_file, Keypair, Signer};
+use solana_sdk::{
+    commitment_config::CommitmentConfig,
+    signature::{read_keypair_file, Keypair, Signer},
+    transaction::Transaction,
+};
+use solana_client::rpc_client::RpcClient;
 use tokio::time::{sleep, Duration};
 use std::collections::HashMap;
 
@@ -16,6 +22,8 @@ use std::collections::HashMap;
 use clawdbot::db::{SharedDb, DbRound, DbTransaction};
 
 const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
+const MIN_WALLET_SOL: f64 = 0.05;
+const MAX_BET_PER_ROUND_SOL: f64 = 0.04;
 
 /// Load keypair from file path or from environment variable
 fn load_keypair(keypair_path: &str) -> Result<Keypair, String> {
@@ -36,6 +44,72 @@ fn load_keypair(keypair_path: &str) -> Result<Keypair, String> {
     
     read_keypair_file(keypair_path)
         .map_err(|e| format!("Failed to read keypair file '{}': {}", keypair_path, e))
+}
+
+/// Execute a deploy transaction on-chain
+/// Returns the transaction signature on success
+async fn execute_deploy(
+    rpc_url: &str,
+    keypair: &Keypair,
+    squares: &[usize],
+    total_amount_lamports: u64,
+    round_id: u64,
+) -> Result<String, String> {
+    info!("{}", "⚡ CLAWDOREDINATOR EXECUTING DEPLOY...".green().bold());
+    
+    // Convert squares Vec to [bool; 25] array
+    let mut squares_arr = [false; 25];
+    for &sq in squares {
+        if sq < 25 {
+            squares_arr[sq] = true;
+        }
+    }
+    
+    // Build the deploy instruction using ore_api
+    let ix = ore_api::sdk::deploy(
+        keypair.pubkey(),  // signer
+        keypair.pubkey(),  // authority (same for direct deploy)
+        total_amount_lamports,
+        round_id,
+        squares_arr,
+    );
+    
+    // Create RPC client
+    let rpc_client = RpcClient::new_with_commitment(
+        rpc_url.to_string(),
+        CommitmentConfig::confirmed(),
+    );
+    
+    // Get recent blockhash
+    let blockhash = rpc_client.get_latest_blockhash()
+        .map_err(|e| format!("Failed to get blockhash: {}", e))?;
+    
+    // Create and sign transaction
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&keypair.pubkey()),
+        &[keypair],
+        blockhash,
+    );
+    
+    // Send and confirm
+    info!("   📤 Sending transaction...");
+    let signature = rpc_client.send_and_confirm_transaction(&tx)
+        .map_err(|e| format!("Transaction failed: {}", e))?;
+    
+    info!("{}", format!("   ✅ Transaction confirmed: {}", signature).green());
+    
+    Ok(signature.to_string())
+}
+
+/// Get wallet balance in lamports
+fn get_balance(rpc_url: &str, pubkey: &solana_sdk::pubkey::Pubkey) -> Result<u64, String> {
+    let rpc_client = RpcClient::new_with_commitment(
+        rpc_url.to_string(),
+        CommitmentConfig::confirmed(),
+    );
+    rpc_client.get_balance(pubkey)
+        .map_err(|e| format!("Failed to get balance: {}", e))
 }
 
 const BOT_NAME: &str = "coordinator";
@@ -546,6 +620,77 @@ async fn main() {
                             .map(|w| format!("{:.1}%", w * 100.0))
                             .collect::<Vec<_>>());
                         info!("   Confidence: {:.0}%", consensus.confidence * 100.0);
+                    }
+
+                    // ═══════════════════════════════════════════════════════════════
+                    // CLAWDOREDINATOR IS THE DECIDER - EXECUTE DEPLOY IF CONDITIONS MET
+                    // ═══════════════════════════════════════════════════════════════
+                    let mode = std::env::var("MODE").unwrap_or_else(|_| "simulation".to_string());
+                    
+                    if let Some(ref keypair) = wallet_info {
+                        let balance = get_balance(&config.rpc_url, &keypair.pubkey()).unwrap_or(0);
+                        let balance_sol = balance as f64 / LAMPORTS_PER_SOL as f64;
+                        let competition = CompetitionLevel::from_deployed(total_deployed);
+                        
+                        // Make deploy decision
+                        let should_deploy = consensus.confidence > 0.4 
+                            && !consensus.squares.is_empty()
+                            && balance_sol >= MIN_WALLET_SOL
+                            && !matches!(competition, CompetitionLevel::VeryHigh);
+                        
+                        if should_deploy {
+                            let available_sol = (balance_sol - MIN_WALLET_SOL).min(MAX_BET_PER_ROUND_SOL);
+                            let total_lamports = (available_sol * LAMPORTS_PER_SOL as f64) as u64;
+                            
+                            info!("\n{}", "🚀 CLAWDOREDINATOR DEPLOYING!".green().bold());
+                            info!("   Squares: {:?}", consensus.squares);
+                            info!("   Amount: {:.4} SOL", available_sol);
+                            info!("   Competition: {:?}", competition);
+                            info!("   Mode: {}", mode);
+                            
+                            if mode == "live" || mode == "executor" {
+                                match execute_deploy(
+                                    &config.rpc_url,
+                                    keypair,
+                                    &consensus.squares,
+                                    total_lamports,
+                                    current_round,
+                                ).await {
+                                    Ok(sig) => {
+                                        info!("{}", format!("   ✅ DEPLOYED! Sig: {}", sig).green());
+                                        
+                                        // Record to database
+                                        #[cfg(feature = "database")]
+                                        if let Some(ref db) = db {
+                                            db.set_state("last_deploy", serde_json::json!({
+                                                "round_id": current_round,
+                                                "squares": consensus.squares,
+                                                "amount_lamports": total_lamports,
+                                                "signature": sig,
+                                                "mode": mode,
+                                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                                            })).await.ok();
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("   ❌ Deploy failed: {}", e);
+                                    }
+                                }
+                            } else {
+                                info!("   📋 SIMULATION - no transaction sent");
+                            }
+                        } else {
+                            let skip_reason = if balance_sol < MIN_WALLET_SOL {
+                                format!("Low balance ({:.4} SOL)", balance_sol)
+                            } else if matches!(competition, CompetitionLevel::VeryHigh) {
+                                "Very high competition".to_string()
+                            } else if consensus.confidence <= 0.4 {
+                                format!("Low confidence ({:.0}%)", consensus.confidence * 100.0)
+                            } else {
+                                "No squares recommended".to_string()
+                            };
+                            info!("   ⏸️  Skipping deploy: {}", skip_reason);
+                        }
                     }
 
                     // Send strategy signals to database
