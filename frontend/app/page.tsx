@@ -155,12 +155,15 @@ export default function Home() {
         console.log('Heartbeats found:', heartbeats.length)
         
         setBots(prev => prev.map(bot => {
-          const lastHb = heartbeats.find((h: Signal) => 
-            h.source_bot === bot.name || 
-            h.source_bot === bot.id || 
-            h.source_bot === bot.id + '-bot' ||
-            h.source_bot === 'coordinator' && bot.id === 'coordinator'
-          )
+          const lastHb = heartbeats.find((h: Signal) => {
+            const src = h.source_bot.toLowerCase()
+            return (
+              src === bot.name.toLowerCase() || 
+              src === bot.id.toLowerCase() || 
+              src === (bot.id + '-bot').toLowerCase() ||
+              (src === 'coordinator' && bot.id === 'coordinator')
+            )
+          })
           if (lastHb) {
             const hbTime = new Date(lastHb.created_at)
             const diffSecs = (now.getTime() - hbTime.getTime()) / 1000
@@ -196,23 +199,37 @@ export default function Home() {
         const data = await stateRes.json()
         
         if (data.monitor_status) {
+          // Parse deployed_squares - might be strings from database
+          const deployedSquares = (data.monitor_status.deployed_squares || []).map((v: any) => 
+            typeof v === 'string' ? parseInt(v, 10) : v
+          )
+          
           setCurrentRound({
             round_id: data.monitor_status.round_id,
-            total_deployed: data.monitor_status.total_deployed,
-            deployed_squares: data.monitor_status.deployed_squares || [],
+            total_deployed: typeof data.monitor_status.total_deployed === 'string' 
+              ? parseInt(data.monitor_status.total_deployed, 10) 
+              : data.monitor_status.total_deployed,
+            deployed_squares: deployedSquares,
             winning_square: data.monitor_status.winning_square,
           })
+          
+          const totalDeployed = typeof data.monitor_status.total_deployed === 'string'
+            ? parseInt(data.monitor_status.total_deployed, 10)
+            : data.monitor_status.total_deployed
+            
           setStats(prev => ({
             ...prev,
             currentRound: data.monitor_status.round_id,
-            totalDeployed: (data.monitor_status.total_deployed / 1e9).toFixed(4),
+            totalDeployed: (totalDeployed / 1e9).toFixed(4),
           }))
         }
 
         if (data.consensus_recommendation) {
           setRecommendation({
             squares: data.consensus_recommendation.squares,
-            weights: data.consensus_recommendation.weights,
+            weights: data.consensus_recommendation.weights.map((w: number) => 
+              (w * 100).toFixed(1) + '%'
+            ),
             confidence: data.consensus_recommendation.confidence,
           })
         }
