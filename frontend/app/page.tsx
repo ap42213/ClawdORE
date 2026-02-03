@@ -42,9 +42,20 @@ export default function Home() {
   ])
   const [currentRound, setCurrentRound] = useState<number>(4821)
   const [connected, setConnected] = useState(false)
-  const [stats, setStats] = useState({ wins: 47, rounds: 312, oreEarned: 2.35 })
+  const [stats, setStats] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('clawdore_stats')
+      if (saved) return JSON.parse(saved)
+    }
+    return { wins: 0, rounds: 0, oreEarned: 0 }
+  })
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
+
+  // Persist stats to localStorage
+  useEffect(() => {
+    localStorage.setItem('clawdore_stats', JSON.stringify(stats))
+  }, [stats])
 
   const addLog = (bot: string, type: LogEntry['type'], message: string) => {
     const entry: LogEntry = {
@@ -175,22 +186,22 @@ export default function Home() {
   // Simulate bot activity for demo
   useEffect(() => {
     const decisions = [
-      { bot: 'ORE', type: 'info' as const, msg: '⏱️ Round #4821 ending in 45 seconds...' },
-      { bot: 'MINEORE', type: 'decision' as const, msg: '🎯 Analyzing round conditions...' },
-      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '📊 Competition level: LOW - favorable conditions' },
-      { bot: 'LEARNORE', type: 'ai' as const, msg: '🧠 Historical win rate for 5 squares: 23.4%' },
-      { bot: 'CLAWDOREDINATOR', type: 'action' as const, msg: '📡 Broadcasting consensus to swarm...' },
-      { bot: 'ORE', type: 'action' as const, msg: '🎰 Round #4821 complete! Winning square: 14' },
-      { bot: 'MINEORE', type: 'win' as const, msg: '🏆 WE WON! Square 14 matched our deploy!' },
-      { bot: 'ORE', type: 'info' as const, msg: '💎 Block reward: 0.05 ORE claimed' },
-      { bot: 'MINEORE', type: 'action' as const, msg: '⚡ Preparing deploy: squares [3, 7, 12, 18, 22]' },
-      { bot: 'BETORE', type: 'decision' as const, msg: '💰 Expected ROI: +12.3% based on current odds' },
-      { bot: 'PARSEORE', type: 'info' as const, msg: '🔍 Parsed 47 transactions this round' },
-      { bot: 'MONITORE', type: 'info' as const, msg: '👁️ Tracking 12 active deployers' },
-      { bot: 'AI-ADVISORE', type: 'ai' as const, msg: '🤖 Suggests avoiding crowded squares 1, 25' },
-      { bot: 'ORE', type: 'info' as const, msg: '🆕 Round #4822 started - 60 slots remaining' },
-      { bot: 'LEARNORE', type: 'ai' as const, msg: '📈 Pattern detected: whales deploy late in round' },
-      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '⚖️ Risk assessment: MODERATE (0.67)' },
+      { bot: 'ORE', type: 'info' as const, msg: '⏱️ Round ending in 45 seconds...', event: null },
+      { bot: 'MINEORE', type: 'decision' as const, msg: '🎯 Analyzing round conditions...', event: null },
+      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '📊 Competition level: LOW - favorable conditions', event: null },
+      { bot: 'LEARNORE', type: 'ai' as const, msg: '🧠 Historical win rate for 5 squares: 23.4%', event: null },
+      { bot: 'CLAWDOREDINATOR', type: 'action' as const, msg: '📡 Broadcasting consensus to swarm...', event: null },
+      { bot: 'ORE', type: 'action' as const, msg: '🎰 Round complete! Winning square: 14', event: 'round_end' },
+      { bot: 'MINEORE', type: 'win' as const, msg: '🏆 WE WON! Square 14 matched our deploy!', event: 'win' },
+      { bot: 'ORE', type: 'info' as const, msg: '💎 Block reward: 0.05 ORE claimed', event: null },
+      { bot: 'MINEORE', type: 'action' as const, msg: '⚡ Preparing deploy: squares [3, 7, 12, 18, 22]', event: null },
+      { bot: 'BETORE', type: 'decision' as const, msg: '💰 Expected ROI: +12.3% based on current odds', event: null },
+      { bot: 'PARSEORE', type: 'info' as const, msg: '🔍 Parsed 47 transactions this round', event: null },
+      { bot: 'MONITORE', type: 'info' as const, msg: '👁️ Tracking 12 active deployers', event: null },
+      { bot: 'AI-ADVISORE', type: 'ai' as const, msg: '🤖 Suggests avoiding crowded squares 1, 25', event: null },
+      { bot: 'ORE', type: 'info' as const, msg: '🆕 New round started - 60 slots remaining', event: null },
+      { bot: 'LEARNORE', type: 'ai' as const, msg: '📈 Pattern detected: whales deploy late in round', event: null },
+      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '⚖️ Risk assessment: MODERATE (0.67)', event: null },
     ]
 
     let idx = 0
@@ -198,6 +209,15 @@ export default function Home() {
       if (Math.random() > 0.4) {
         const d = decisions[idx % decisions.length]
         addLog(d.bot, d.type, d.msg)
+        
+        // Track stats
+        if (d.event === 'round_end') {
+          setStats(prev => ({ ...prev, rounds: prev.rounds + 1 }))
+          setCurrentRound(prev => prev + 1)
+        } else if (d.event === 'win') {
+          setStats(prev => ({ ...prev, wins: prev.wins + 1, oreEarned: prev.oreEarned + 0.05 }))
+        }
+        
         idx++
       }
     }, 2500)
