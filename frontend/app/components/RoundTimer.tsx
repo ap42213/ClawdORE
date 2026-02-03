@@ -40,21 +40,37 @@ export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60,
   const minutes = Math.floor(displayTime / 60)
   const seconds = displayTime % 60
   
+  // Mining decision thresholds
+  const SIGN_DEADLINE = 10      // Must sign tx by this time
+  const DECISION_TIME = 10.5    // Analyze and decide by this time  
+  const PREPARE_TIME = 15       // Start preparing strategy
+  
   // Progress percentage (inverted - fills as time passes)
   const progress = roundDuration > 0 ? ((roundDuration - displayTime) / roundDuration) * 100 : 0
   
-  // Color based on time remaining
+  // Color based on mining decision windows
   const getColor = () => {
-    if (displayTime <= 10) return 'text-red-400'
-    if (displayTime <= 20) return 'text-yellow-400'
+    if (displayTime <= SIGN_DEADLINE) return 'text-red-400'
+    if (displayTime <= DECISION_TIME) return 'text-orange-400'
+    if (displayTime <= PREPARE_TIME) return 'text-yellow-400'
     return 'text-green-400'
   }
   
   const getBarColor = () => {
-    if (displayTime <= 10) return 'bg-red-500'
-    if (displayTime <= 20) return 'bg-yellow-500'
+    if (displayTime <= SIGN_DEADLINE) return 'bg-red-500'
+    if (displayTime <= DECISION_TIME) return 'bg-orange-500'
+    if (displayTime <= PREPARE_TIME) return 'bg-yellow-500'
     return 'bg-green-500'
   }
+  
+  const getMiningStatus = () => {
+    if (displayTime <= SIGN_DEADLINE && displayTime > 0) return { icon: '🚨', text: 'SIGN NOW', urgent: true }
+    if (displayTime <= DECISION_TIME) return { icon: '⚡', text: 'DECIDE', urgent: true }
+    if (displayTime <= PREPARE_TIME) return { icon: '📊', text: 'PREPARE', urgent: false }
+    return null
+  }
+  
+  const miningStatus = getMiningStatus()
 
   return (
     <div className="bg-slate-800/80 backdrop-blur rounded-xl p-4 border border-slate-700/50">
@@ -82,9 +98,9 @@ export default function RoundTimer({ roundId, timeRemaining, roundDuration = 60,
         />
       </div>
       
-      {displayTime <= 10 && displayTime > 0 && (
-        <div className="mt-2 text-center text-xs text-red-400 animate-pulse">
-          ⚠️ Round ending soon!
+      {miningStatus && (
+        <div className={`mt-2 text-center text-xs ${miningStatus.urgent ? 'animate-pulse' : ''} ${getColor()}`}>
+          {miningStatus.icon} {miningStatus.text}
         </div>
       )}
     </div>
