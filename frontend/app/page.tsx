@@ -138,12 +138,37 @@ export default function Home() {
           const data = await stateRes.json()
           if (data.monitor_status?.round_id) {
             setCurrentRound(data.monitor_status.round_id)
+            
+            // Log real ORE data
+            const status = data.monitor_status
+            if (status.time_remaining_secs !== undefined) {
+              addLog('ORE', 'info', 
+                `⏱️ Round #${status.round_id} - ${Math.round(status.time_remaining_secs)}s remaining, ${status.active_squares || 0} squares active`)
+            }
+          }
+          
+          // Log last deploy if available
+          if (data.last_deploy) {
+            const dep = data.last_deploy
+            addLog('CLAWDOREDINATOR', 'action', 
+              `⚡ Deployed squares [${dep.squares?.join(', ')}] - ${(dep.amount_lamports / 1e9).toFixed(4)} SOL`)
           }
           
           if (data.consensus_recommendation) {
             const rec = data.consensus_recommendation
-            addLog('AI-ADVISORE', 'ai', 
-              `🤖 Recommending squares [${rec.squares?.join(', ')}] with ${Math.round((rec.confidence || 0) * 100)}% confidence`)
+            addLog('CLAWDOREDINATOR', 'decision', 
+              `🎯 Consensus: squares [${rec.squares?.join(', ')}] (${Math.round((rec.confidence || 0) * 100)}% confidence)`)
+          }
+        }
+        
+        // Fetch real ORE blockchain data
+        const oreRes = await fetch('/api/ore')
+        if (oreRes.ok) {
+          const oreData = await oreRes.json()
+          if (oreData.round_id && oreData.round_id !== currentRound) {
+            setCurrentRound(oreData.round_id)
+            addLog('ORE', 'info', 
+              `🆕 Round #${oreData.round_id} - ${oreData.total_deployed_sol?.toFixed(2) || 0} SOL total deployed`)
           }
         }
 
@@ -174,38 +199,9 @@ export default function Home() {
     }
   }, [logs])
 
-  // Simulate bot activity for demo
-  useEffect(() => {
-    const decisions = [
-      { bot: 'ORE', type: 'info' as const, msg: '⏱️ Round ending in 45 seconds...' },
-      { bot: 'MINEORE', type: 'decision' as const, msg: '🎯 Analyzing round conditions...' },
-      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '📊 Competition level: LOW - favorable conditions' },
-      { bot: 'LEARNORE', type: 'ai' as const, msg: '🧠 Historical win rate for 5 squares: 23.4%' },
-      { bot: 'CLAWDOREDINATOR', type: 'action' as const, msg: '📡 Broadcasting consensus to swarm...' },
-      { bot: 'ORE', type: 'action' as const, msg: '🎰 Round complete! Winning square: 14' },
-      { bot: 'MINEORE', type: 'win' as const, msg: '🏆 WE WON! Square 14 matched our deploy!' },
-      { bot: 'ORE', type: 'info' as const, msg: '💎 Block reward: 0.05 ORE claimed' },
-      { bot: 'MINEORE', type: 'action' as const, msg: '⚡ Preparing deploy: squares [3, 7, 12, 18, 22]' },
-      { bot: 'BETORE', type: 'decision' as const, msg: '💰 Expected ROI: +12.3% based on current odds' },
-      { bot: 'PARSEORE', type: 'info' as const, msg: '🔍 Parsed 47 transactions this round' },
-      { bot: 'MONITORE', type: 'info' as const, msg: '👁️ Tracking 12 active deployers' },
-      { bot: 'AI-ADVISORE', type: 'ai' as const, msg: '🤖 Suggests avoiding crowded squares 1, 25' },
-      { bot: 'ORE', type: 'info' as const, msg: '🆕 New round started - 60 slots remaining' },
-      { bot: 'LEARNORE', type: 'ai' as const, msg: '📈 Pattern detected: whales deploy late in round' },
-      { bot: 'ANALYTICORE', type: 'decision' as const, msg: '⚖️ Risk assessment: MODERATE (0.67)' },
-    ]
-
-    let idx = 0
-    const interval = setInterval(() => {
-      if (Math.random() > 0.4) {
-        const d = decisions[idx % decisions.length]
-        addLog(d.bot, d.type, d.msg)
-        idx++
-      }
-    }, 2500)
-
-    return () => clearInterval(interval)
-  }, [])
+  // NO DEMO - only real data from API/database
+  // The bots write real ORE blockchain data to the database
+  // This frontend just displays what's actually happening
 
   const getTypeStyle = (type: LogEntry['type']) => {
     switch (type) {
