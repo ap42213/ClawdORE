@@ -328,7 +328,7 @@ impl OreStrategyEngine {
             let stats = &self.square_count_performance[count as usize];
             if stats.times_used >= min_samples as u32 {
                 counts_with_data += 1;
-                if stats.wins > 0 {
+                if stats.times_won > 0 {
                     counts_with_wins += 1;
                 }
             }
@@ -363,7 +363,7 @@ impl OreStrategyEngine {
             }
             
             // Skip counts with 0 wins - they haven't proven themselves
-            if stats.wins == 0 {
+            if stats.times_won == 0 {
                 continue;
             }
 
@@ -387,7 +387,7 @@ impl OreStrategyEngine {
                 best_count = count;
                 reasoning = format!(
                     "LEARNED: {} squares = {:.1}% win rate ({} wins), {:.2} efficiency, {} samples",
-                    count, actual_win_rate * 100.0, stats.wins, ore_efficiency, stats.times_used
+                    count, actual_win_rate * 100.0, stats.times_won, ore_efficiency, stats.times_used
                 );
             }
         }
