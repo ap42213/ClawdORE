@@ -281,16 +281,19 @@ async fn main() {
         }
     };
 
+    // Keypair is optional for analytics (read-only operations)
     let keypair = match load_keypair(&config.keypair_path) {
-        Ok(kp) => kp,
+        Ok(kp) => {
+            info!("🔑 Wallet: {}", kp.pubkey());
+            kp
+        }
         Err(e) => {
-            error!("Failed to load keypair: {}", e);
-            return;
+            warn!("⚠️ No keypair loaded ({}), using dummy keypair for read-only mode", e);
+            Keypair::new() // Generate temporary keypair for read-only RPC calls
         }
     };
 
     info!("📡 RPC: {}", config.rpc_url);
-    info!("🔑 Wallet: {}", keypair.pubkey());
     info!("═══════════════════════════════════════════════════════════════");
 
     let client = OreClient::new(config.rpc_url.clone(), keypair);

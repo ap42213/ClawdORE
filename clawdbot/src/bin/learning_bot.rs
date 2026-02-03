@@ -185,10 +185,27 @@ async fn main() {
 
     let mut last_round_id: u64 = 0;
     let mut current_round_deploys: std::collections::HashMap<String, (u64, Vec<u8>)> = std::collections::HashMap::new();
+    let mut iteration_count: u32 = 0;
 
     // Main learning loop
     while running.load(std::sync::atomic::Ordering::SeqCst) {
+        iteration_count += 1;
         info!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".bright_magenta());
+        
+        // Send heartbeat
+        #[cfg(feature = "database")]
+        if let Some(ref db) = db {
+            use clawdbot::db::{Signal, SignalType};
+            let signal = Signal::new(
+                SignalType::Heartbeat,
+                BOT_NAME,
+                serde_json::json!({
+                    "iteration": iteration_count,
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                }),
+            );
+            db.send_signal(&signal).await.ok();
+        }
         
         // Fetch current round state
         let current_round = match parser.get_board() {
