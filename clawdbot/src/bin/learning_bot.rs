@@ -364,6 +364,12 @@ async fn main() {
                                 square_count as i16,
                                 tx.slot as i64,
                             ).await.ok();
+                            
+                            // Also update square count statistics (critical for learning optimal count)
+                            db.record_square_count_deploy(
+                                square_count as i16,
+                                deploy.amount_lamports as i64,
+                            ).await.ok();
                         }
                         
                         new_deploys += 1;
@@ -468,6 +474,12 @@ async fn main() {
                                         // Update player win record
                                         db.record_player_win(
                                             address,
+                                            (competition_on_square as f64 * winner_share) as i64,
+                                        ).await.ok();
+                                        
+                                        // Update square count win statistics (critical for learning)
+                                        db.record_square_count_win(
+                                            num_squares as i16,
                                             (competition_on_square as f64 * winner_share) as i64,
                                         ).await.ok();
                                     }

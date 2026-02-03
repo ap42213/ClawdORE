@@ -318,13 +318,14 @@ impl OreStrategyEngine {
         let mut best_score = 0.0f64;
         let mut reasoning = String::new();
 
-        // Find which counts have enough data (minimum 10 samples)
+        // Find which counts have enough data (minimum 5 samples to start learning)
         let mut counts_with_data = 0;
+        let min_samples = 5; // Lowered from 10 to learn faster
         
         // Score each square count by: win_rate * ore_efficiency - cost
         for count in 1..=25u8 {
             let stats = &self.square_count_performance[count as usize];
-            if stats.times_used < 10 {
+            if stats.times_used < min_samples as u32 {
                 continue; // Not enough data
             }
             
@@ -355,13 +356,13 @@ impl OreStrategyEngine {
             }
         }
 
-        // If no sufficient data, EXPLORE - pick the count with LEAST samples to gather data
-        if counts_with_data < 3 || best_score == 0.0 {
+        // If we have at least 1 count with good data, use it; otherwise explore
+        if counts_with_data < 1 || best_score == 0.0 {
             best_count = self.pick_exploration_count();
             best_score = 0.0; // No confidence yet
             reasoning = format!(
                 "EXPLORING: Trying {} squares to gather data ({}+ samples needed per count)",
-                best_count, 10
+                best_count, min_samples
             );
         }
 
@@ -384,12 +385,11 @@ impl OreStrategyEngine {
         // Sort by fewest samples first (explore the unknown)
         exploration_candidates.sort_by_key(|(_count, samples)| *samples);
         
-        // Weight selection toward less-explored counts, but allow any
-        // Use inverse weighting: fewer samples = higher chance
+        // Use microseconds for better randomness
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis();
+            .as_micros();
         
         // Pick from ALL 25 counts, weighted by exploration need
         // Lower samples = picked more often
@@ -397,7 +397,9 @@ impl OreStrategyEngine {
             .map(|(_, samples)| 1000 / (samples + 1)) // +1 to avoid division by zero
             .sum();
         
-        let random_val = (now as u32) % total_inverse.max(1);
+        // Add round counter to break determinism across calls
+        let round_offset = self.round_history.len() as u128;
+        let random_val = ((now + round_offset * 12345) as u32) % total_inverse.max(1);
         let mut cumulative = 0u32;
         
         for (count, samples) in &exploration_candidates {
