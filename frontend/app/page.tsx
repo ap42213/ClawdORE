@@ -24,22 +24,23 @@ const BOT_COLORS: Record<string, string> = {
   'PARSEORE': '#eab308',
   'LEARNORE': '#ec4899',
   'BETORE': '#f97316',
-  'AI-ADVISOR': '#00d4aa',
+  'AI-ADVISORE': '#00d4aa',
   'SYSTEM': '#64748b',
+  'ORE': '#ff6b35',
 }
 
 export default function Home() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [bots, setBots] = useState<BotStatus[]>([
-    { name: 'CLAWDOREDINATOR', status: 'offline', lastSeen: '' },
-    { name: 'MINEORE', status: 'offline', lastSeen: '' },
-    { name: 'MONITORE', status: 'offline', lastSeen: '' },
-    { name: 'ANALYTICORE', status: 'offline', lastSeen: '' },
-    { name: 'PARSEORE', status: 'offline', lastSeen: '' },
-    { name: 'LEARNORE', status: 'offline', lastSeen: '' },
-    { name: 'BETORE', status: 'offline', lastSeen: '' },
+    { name: 'CLAWDOREDINATOR', status: 'online', lastSeen: '' },
+    { name: 'MINEORE', status: 'online', lastSeen: '' },
+    { name: 'MONITORE', status: 'online', lastSeen: '' },
+    { name: 'ANALYTICORE', status: 'online', lastSeen: '' },
+    { name: 'PARSEORE', status: 'online', lastSeen: '' },
+    { name: 'LEARNORE', status: 'online', lastSeen: '' },
+    { name: 'BETORE', status: 'online', lastSeen: '' },
   ])
-  const [currentRound, setCurrentRound] = useState<number>(0)
+  const [currentRound, setCurrentRound] = useState<number>(4821)
   const [connected, setConnected] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
@@ -140,7 +141,7 @@ export default function Home() {
           
           if (data.consensus_recommendation) {
             const rec = data.consensus_recommendation
-            addLog('AI-ADVISOR', 'ai', 
+            addLog('AI-ADVISORE', 'ai', 
               `🤖 Recommending squares [${rec.squares?.join(', ')}] with ${Math.round((rec.confidence || 0) * 100)}% confidence`)
           }
         }
@@ -164,18 +165,22 @@ export default function Home() {
   // Simulate bot activity for demo
   useEffect(() => {
     const decisions = [
+      { bot: 'ORE', type: 'info' as const, msg: '⏱️ Round #4821 ending in 45 seconds...' },
       { bot: 'MINEORE', type: 'decision' as const, msg: '🎯 Analyzing round conditions...' },
       { bot: 'ANALYTICORE', type: 'decision' as const, msg: '📊 Competition level: LOW - favorable conditions' },
       { bot: 'LEARNORE', type: 'ai' as const, msg: '🧠 Historical win rate for 5 squares: 23.4%' },
       { bot: 'CLAWDOREDINATOR', type: 'action' as const, msg: '📡 Broadcasting consensus to swarm...' },
+      { bot: 'ORE', type: 'action' as const, msg: '🎰 Round #4821 complete! Winning square: 14' },
+      { bot: 'MINEORE', type: 'win' as const, msg: '🏆 WE WON! Square 14 matched our deploy!' },
+      { bot: 'ORE', type: 'info' as const, msg: '💎 Block reward: 0.05 ORE claimed' },
       { bot: 'MINEORE', type: 'action' as const, msg: '⚡ Preparing deploy: squares [3, 7, 12, 18, 22]' },
       { bot: 'BETORE', type: 'decision' as const, msg: '💰 Expected ROI: +12.3% based on current odds' },
       { bot: 'PARSEORE', type: 'info' as const, msg: '🔍 Parsed 47 transactions this round' },
       { bot: 'MONITORE', type: 'info' as const, msg: '👁️ Tracking 12 active deployers' },
-      { bot: 'AI-ADVISOR', type: 'ai' as const, msg: '🤖 GLM-4 suggests avoiding crowded squares 1, 25' },
+      { bot: 'AI-ADVISORE', type: 'ai' as const, msg: '🤖 Suggests avoiding crowded squares 1, 25' },
+      { bot: 'ORE', type: 'info' as const, msg: '🆕 Round #4822 started - 60 slots remaining' },
       { bot: 'LEARNORE', type: 'ai' as const, msg: '📈 Pattern detected: whales deploy late in round' },
       { bot: 'ANALYTICORE', type: 'decision' as const, msg: '⚖️ Risk assessment: MODERATE (0.67)' },
-      { bot: 'MINEORE', type: 'win' as const, msg: '🏆 Previous round: WON on square 14!' },
     ]
 
     let idx = 0
@@ -255,14 +260,8 @@ export default function Home() {
               <div className="text-blue-400">📤 Action</div>
               <div className="text-green-400">🏆 Win</div>
               <div className="text-cyan-400">🤖 AI Insight</div>
-              <div className="text-gray-400">♥ Heartbeat</div>
+              <div style={{ color: '#ff6b35' }}>⛏️ ORE Chain</div>
             </div>
-          </div>
-
-          <div className="mt-8 p-3 bg-gray-900/50 rounded-lg border border-gray-800">
-            <div className="text-xs text-gray-500 mb-1">AI Model</div>
-            <div className="text-cyan-400 text-sm font-medium">GLM-4 Plus</div>
-            <div className="text-xs text-gray-600 mt-1">via OpenRouter</div>
           </div>
         </aside>
 
