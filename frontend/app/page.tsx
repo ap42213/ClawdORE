@@ -173,14 +173,66 @@ export default function Home() {
           }
         }
         
-        // Fetch real ORE blockchain data
+        // Fetch real ORE blockchain data (includes winning square!)
         const oreRes = await fetch('/api/ore')
         if (oreRes.ok) {
           const oreData = await oreRes.json()
-          if (oreData.round_id && oreData.round_id !== currentRound) {
-            setCurrentRound(oreData.round_id)
-            addLog('ORE', 'info', 
-              `🆕 Round #${oreData.round_id} - ${oreData.total_deployed_sol?.toFixed(2) || 0} SOL total deployed`)
+          if (oreData.round_id) {
+            // Update current round
+            if (oreData.round_id !== currentRound) {
+              setCurrentRound(oreData.round_id)
+              addLog('ORE', 'info', 
+                `🆕 Round #${oreData.round_id} - ${oreData.total_deployed_sol?.toFixed(2) || 0} SOL total deployed`)
+            }
+            
+            // Check for last winning square from blockchain
+            if (oreData.last_winning_square !== null && oreData.last_round_id) {
+              const winningSquare = oreData.last_winning_square
+              const lastRoundId = oreData.last_round_id
+              
+              // Only log if we haven't seen this round result yet
+              if (!seenRoundsRef.current.has(lastRoundId)) {
+                seenRoundsRef.current.add(lastRoundId)
+                
+                // Update last winner display
+                setLastWinner({ round_id: lastRoundId, winning_square: winningSquare })
+                
+                // Log the winning square from blockchain
+                addLog('ORE', 'info', 
+                  `🎰 Round #${lastRoundId} WINNER: Square ${winningSquare}`)
+                
+                // Check if our consensus pick included the winning square
+                // Get our last picks from state
+                const stateRes2 = await fetch('/api/state')
+                if (stateRes2.ok) {
+                  const stateData = await stateRes2.json()
+                  const ourPicks = stateData.consensus_recommendation?.squares || []
+                  
+                  if (ourPicks.length > 0) {
+                    const hit = ourPicks.includes(winningSquare)
+                    if (hit) {
+                      addLog('RESULT', 'win', 
+                        `✅ WIN! We picked [${ourPicks.join(', ')}] - winner was ${winningSquare}`)
+                      setStats(prev => ({
+                        ...prev,
+                        wins: prev.wins + 1,
+                        total: prev.total + 1,
+                        winRate: ((prev.wins + 1) / (prev.total + 1) * 100).toFixed(1),
+                      }))
+                    } else {
+                      addLog('RESULT', 'loss', 
+                        `❌ LOSS - We picked [${ourPicks.join(', ')}] - winner was ${winningSquare}`)
+                      setStats(prev => ({
+                        ...prev,
+                        losses: prev.losses + 1,
+                        total: prev.total + 1,
+                        winRate: (prev.wins / (prev.total + 1) * 100).toFixed(1),
+                      }))
+                    }
+                  }
+                }
+              }
+            }
           }
         }
 
