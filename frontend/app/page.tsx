@@ -1,11 +1,40 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import BotCard from './components/BotCard'
 import Terminal from './components/Terminal'
 import Stats from './components/Stats'
 import BoardGrid from './components/BoardGrid'
 import StrategyPanel from './components/StrategyPanel'
+
+// Local storage keys for persistence
+const STORAGE_KEYS = {
+  ROUND: 'clawdore_round',
+  RECOMMENDATION: 'clawdore_recommendation',
+  STATS: 'clawdore_stats',
+  LOGS: 'clawdore_logs',
+} as const
+
+// Helper to safely get from localStorage
+function getStoredValue<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const stored = localStorage.getItem(key)
+    return stored ? JSON.parse(stored) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+// Helper to safely set localStorage
+function setStoredValue(key: string, value: any): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 export interface Bot {
   id: string
@@ -96,35 +125,68 @@ export default function Home() {
     },
   ])
 
-  const [logs, setLogs] = useState<string[]>([
-    '🚀 ClawdORE Dashboard initialized',
-    '📡 Connecting to database...',
-  ])
+  const [logs, setLogs] = useState<string[]>(() => 
+    getStoredValue(STORAGE_KEYS.LOGS, [
+      '🚀 ClawdORE Dashboard initialized',
+      '📡 Connecting to database...',
+    ])
+  )
 
-  const [stats, setStats] = useState({
-    balance: '0.00',
-    roundsWon: 0,
-    totalDeployed: '0.00',
-    activeBots: 0,
-    currentRound: 0,
-    playersTracked: 0,
-    transactionsProcessed: 0,
-  })
+  const [stats, setStats] = useState(() => 
+    getStoredValue(STORAGE_KEYS.STATS, {
+      balance: '0.00',
+      roundsWon: 0,
+      totalDeployed: '0.00',
+      activeBots: 0,
+      currentRound: 0,
+      playersTracked: 0,
+      transactionsProcessed: 0,
+    })
+  )
 
-  const [currentRound, setCurrentRound] = useState<RoundData | null>(null)
+  const [currentRound, setCurrentRound] = useState<RoundData | null>(() =>
+    getStoredValue(STORAGE_KEYS.ROUND, null)
+  )
   const [recommendation, setRecommendation] = useState<{
     squares: number[]
     weights: string[]
     confidence: number
-  } | null>(null)
+  } | null>(() => getStoredValue(STORAGE_KEYS.RECOMMENDATION, null))
 
   const [signals, setSignals] = useState<Signal[]>([])
   const [mounted, setMounted] = useState(false)
 
-  // Only run on client
+  // Only run on client - restore from localStorage
   useEffect(() => {
     setMounted(true)
+    // Restore persisted state on mount
+    const storedRound = getStoredValue(STORAGE_KEYS.ROUND, null)
+    const storedRec = getStoredValue(STORAGE_KEYS.RECOMMENDATION, null)
+    const storedStats = getStoredValue(STORAGE_KEYS.STATS, null)
+    const storedLogs = getStoredValue(STORAGE_KEYS.LOGS, null)
+    
+    if (storedRound) setCurrentRound(storedRound)
+    if (storedRec) setRecommendation(storedRec)
+    if (storedStats) setStats(storedStats)
+    if (storedLogs && storedLogs.length > 2) setLogs(storedLogs)
   }, [])
+
+  // Persist state changes to localStorage
+  useEffect(() => {
+    if (currentRound) setStoredValue(STORAGE_KEYS.ROUND, currentRound)
+  }, [currentRound])
+
+  useEffect(() => {
+    if (recommendation) setStoredValue(STORAGE_KEYS.RECOMMENDATION, recommendation)
+  }, [recommendation])
+
+  useEffect(() => {
+    setStoredValue(STORAGE_KEYS.STATS, stats)
+  }, [stats])
+
+  useEffect(() => {
+    if (logs.length > 2) setStoredValue(STORAGE_KEYS.LOGS, logs.slice(-30))
+  }, [logs])
 
   // Fetch data from API
   const fetchData = useCallback(async () => {
