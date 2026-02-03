@@ -1,4 +1,5 @@
 use crate::error::{BotError, Result};
+use base64::Engine;
 use log::{debug, info, warn};
 use ore_api::state::{Board, Miner, Round, Treasury};
 use serde::{Deserialize, Serialize};
@@ -507,7 +508,8 @@ impl BlockchainParser {
                 };
 
                 let reset_data = if instruction_type == OreInstructionType::Reset {
-                    self.parse_reset_data(&instruction.data)
+                    // Reset instruction has no data - parse from logs/accounts instead
+                    self.parse_reset_from_logs(tx, &accounts)
                 } else {
                     None
                 };
@@ -549,6 +551,83 @@ impl BlockchainParser {
             winning_square,
             motherlode,
         })
+    }
+
+    /// Parse Reset data from transaction logs (ResetEvent is emitted as program log)
+    fn parse_reset_from_logs(
+        &self,
+        tx: &solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta,
+        accounts: &[String],
+    ) -> Option<ResetData> {
+        // The ResetEvent is emitted via program_log and contains:
+        // disc(8), round_id(8), start_slot(8), end_slot(8), winning_square(8), ...
+        // Total ResetEvent size: 8 + 8 + 8 + 8 + 8 + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 = 144 bytes
+        
+        // Try to extract from inner instructions or return data
+        if let Some(meta) = &tx.transaction.meta {
+            // Check return data for ResetEvent
+            if let Some(return_data) = &meta.return_data {
+                if let solana_transaction_status::option_serializer::OptionSerializer::Some(data_str) = &return_data.data {
+                    // Data is base64 encoded
+                    if let Ok(data) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data_str.0) {
+                        if data.len() >= 48 {
+                            // ResetEvent: disc(8), round_id(8), start_slot(8), end_slot(8), winning_square(8)
+                            let round_id = u64::from_le_bytes(data[8..16].try_into().ok()?);
+                            let winning_square = u64::from_le_bytes(data[32..40].try_into().ok()?) as u8;
+                            
+                            // Check for motherlode in the event (offset 48 = motherlode amount, non-zero means hit)
+                            let motherlode = if data.len() >= 56 {
+                                u64::from_le_bytes(data[48..56].try_into().unwrap_or([0; 8])) > 0
+                            } else {
+                                false
+                            };
+                            
+                            return Some(ResetData {
+                                round_id,
+                                winning_square,
+                                motherlode,
+                            });
+                        }
+                    }
+                }
+            }
+            
+            // Fallback: Parse from logs looking for "Winning square:" pattern
+            if let solana_transaction_status::option_serializer::OptionSerializer::Some(logs) = &meta.log_messages {
+                for log in logs {
+                    // Look for patterns like "winning_square: X" in logs
+                    if log.contains("winning_square") || log.contains("Winning square") {
+                        // Try to extract number
+                        for word in log.split_whitespace() {
+                            if let Ok(num) = word.trim_matches(|c: char| !c.is_ascii_digit()).parse::<u8>() {
+                                if num < 25 {
+                                    // Extract round_id from the round account (6th account in reset)
+                                    let round_id = if accounts.len() >= 6 {
+                                        // We can't easily get round_id from account without RPC call
+                                        // For now, return 0 and rely on board state
+                                        0
+                                    } else {
+                                        0
+                                    };
+                                    
+                                    let motherlode = log.contains("motherlode") || log.contains("MOTHERLODE");
+                                    
+                                    return Some(ResetData {
+                                        round_id,
+                                        winning_square: num,
+                                        motherlode,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we can't parse the event, at least return something to indicate Reset happened
+        // The coordinator can detect the round change and infer the winner from the Round account
+        None
     }
 
     /// Process a parsed transaction and update internal state
