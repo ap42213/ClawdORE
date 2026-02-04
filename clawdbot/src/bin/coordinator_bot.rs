@@ -846,7 +846,7 @@ async fn main() {
                             current_round as i64,
                             &betting_squares,
                             &skipping_squares,
-                            consensus.confidence
+                            consensus.confidence as f32
                         ).await {
                             warn!("📊 Test-20: Failed to lock round {}: {}", current_round, e);
                         } else {
