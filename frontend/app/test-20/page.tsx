@@ -237,8 +237,7 @@ export default function Test20Page() {
               const excluded = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25].filter(s => !lockedForRound.includes(s))
               
               if (hit) {
-                addLog('RESULT', 'win', `✅ ROUND #${rid} - Winner: □${winningSquare} - HIT!`)
-                addLog('RESULT', 'info', `   Our picks: [${lockedForRound.join(', ')}]`)
+                addLog('RESULT', 'win', `✅ #${rid}: □${winningSquare} won - HIT! (was in our 20)`)
                 setStats(prev => ({
                   wins: prev.wins + 1,
                   losses: prev.losses,
@@ -246,8 +245,7 @@ export default function Test20Page() {
                   winRate: ((prev.wins + 1) / (prev.total + 1) * 100).toFixed(1)
                 }))
               } else {
-                addLog('RESULT', 'loss', `❌ ROUND #${rid} - Winner: □${winningSquare} - MISS!`)
-                addLog('RESULT', 'info', `   We excluded: [${excluded.join(', ')}] - □${winningSquare} was in there!`)
+                addLog('RESULT', 'loss', `❌ #${rid}: □${winningSquare} won - MISS! (we skipped ${excluded.join(',')} - □${winningSquare} was there)`)
                 setStats(prev => ({
                   wins: prev.wins,
                   losses: prev.losses + 1,
