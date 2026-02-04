@@ -83,10 +83,23 @@ impl BettingBot {
         }
     }
 
+    fn is_enabled() -> bool {
+        std::env::var("BETTING_ENABLED")
+            .map(|v| v.to_lowercase() != "false" && v != "0")
+            .unwrap_or(true) // Default to enabled
+    }
+
     async fn betting_loop(&self) -> Result<()> {
         info!("🎲 Betting bot started");
 
         loop {
+            // Check if betting is disabled via env var
+            if !Self::is_enabled() {
+                info!("⏸️  Betting disabled (BETTING_ENABLED=false). Sleeping...");
+                sleep(Duration::from_secs(30)).await;
+                continue;
+            }
+
             {
                 let status = self.status.read().unwrap();
                 if *status == BotStatus::Stopped {
