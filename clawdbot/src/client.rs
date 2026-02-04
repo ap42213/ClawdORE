@@ -157,6 +157,47 @@ impl OreClient {
         Ok(rounds)
     }
 
+    /// Checkpoint a miner for a specific round to claim rewards
+    /// This must be called after each round before deploying to the next one
+    pub fn checkpoint(&self, round_id: u64) -> Result<Signature> {
+        info!("✅ Checkpointing round {}", round_id);
+        
+        let checkpoint_ix = ore_api::sdk::checkpoint(
+            self.keypair.pubkey(),  // signer
+            self.keypair.pubkey(),  // authority
+            round_id,
+        );
+        
+        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(400_000);
+        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
+        
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[compute_limit_ix, compute_price_ix, checkpoint_ix],
+            Some(&self.keypair.pubkey()),
+            &[&*self.keypair],
+            recent_blockhash,
+        );
+        
+        let signature = self.rpc_client.send_transaction(&transaction)?;
+        info!("✅ Checkpoint tx sent: {}", signature);
+        Ok(signature)
+    }
+
+    /// Check if miner needs checkpointing for a previous round
+    pub fn needs_checkpoint(&self) -> Result<Option<u64>> {
+        let board = self.get_board()?;
+        let current_round_id = board.round_id;
+        
+        if let Some(miner) = self.get_miner()? {
+            // If miner's round_id is less than current, they need to checkpoint
+            if miner.round_id < current_round_id && miner.round_id > 0 {
+                return Ok(Some(miner.round_id));
+            }
+        }
+        Ok(None)
+    }
+
     /// Deploy SOL to ORE squares
     /// amount_lamports: amount per square in lamports
     /// squares: array of 25 booleans, true = deploy to that square

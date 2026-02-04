@@ -125,6 +125,29 @@ impl BettingBot {
             *last_round = current_round_id;
             drop(last_round);
 
+            // Check if we need to checkpoint from a previous round before deploying
+            match self.client.needs_checkpoint() {
+                Ok(Some(old_round_id)) => {
+                    info!("⚠️  Need to checkpoint round {} before deploying", old_round_id);
+                    match self.client.checkpoint(old_round_id) {
+                        Ok(sig) => {
+                            info!("✅ Checkpointed round {}: {}", old_round_id, sig);
+                            // Small delay to let tx confirm
+                            sleep(Duration::from_millis(500)).await;
+                        }
+                        Err(e) => {
+                            warn!("⚠️  Checkpoint failed (may already be done): {}", e);
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // No checkpoint needed
+                }
+                Err(e) => {
+                    warn!("⚠️  Could not check checkpoint status: {}", e);
+                }
+            }
+
             // Get squares from coordinator recommendations (database) or fall back to local strategy
             let mut squares: Vec<usize> = Vec::new();
             let mut confidence = 0.0;
