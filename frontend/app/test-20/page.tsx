@@ -36,6 +36,13 @@ export default function Test20Page() {
   // Track which squares were locked for which round
   const lockedSquaresRef = useRef<Map<number, number[]>>(new Map())
   const processedResultsRef = useRef<Set<number>>(new Set())
+  // Refs for interval to access current state
+  const currentRoundRef = useRef(0)
+  const recommendedSquaresRef = useRef<number[]>([])
+
+  // Keep refs in sync
+  useEffect(() => { currentRoundRef.current = currentRound }, [currentRound])
+  useEffect(() => { recommendedSquaresRef.current = recommendedSquares }, [recommendedSquares])
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -105,25 +112,18 @@ export default function Test20Page() {
     return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
 
-  // Startup message - only once (check logs to avoid duplicates)
+  // Startup message - only once
   useEffect(() => {
     if (!initialized) return
     if (startedRef.current) return
-    
-    // Check if we already have a startup message in logs
-    const hasStartupMsg = logs.some(l => l.message.includes('20-Square Test Mode') || l.message.includes('Restored:'))
-    if (hasStartupMsg) {
-      startedRef.current = true
-      return
-    }
-    
     startedRef.current = true
+    
     if (stats.total > 0) {
       addLog('SYSTEM', 'info', `📊 Restored: ${stats.wins}W/${stats.losses}L (${stats.winRate}%)`)
     } else {
       addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
     }
-  }, [initialized, logs.length])
+  }, [initialized])
 
   // Fetch live data
   useEffect(() => {
@@ -195,16 +195,16 @@ export default function Test20Page() {
         const testSquares = sortedSquares.slice(0, SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
         const excludedSquares = sortedSquares.slice(SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
         
-        // Update display squares
-        if (JSON.stringify(testSquares) !== JSON.stringify(recommendedSquares)) {
+        // Update display squares (use ref to check current value)
+        if (JSON.stringify(testSquares) !== JSON.stringify(recommendedSquaresRef.current)) {
           setRecommendedSquares(testSquares)
           addLog('TEST-20', 'decision', `🎯 Best ${SQUARE_COUNT} squares: [${testSquares.join(', ')}]`)
           addLog('TEST-20', 'info', `🚫 Excluded (worst 5): [${excludedSquares.join(', ')}]`)
         }
         
-        // Track current round and lock squares for it
+        // Track current round and lock squares for it (use ref to check current value)
         const roundId = Number(state.current_round) || 0
-        if (roundId > 0 && roundId !== currentRound) {
+        if (roundId > 0 && roundId !== currentRoundRef.current) {
           // Lock current squares for this round (will be judged when round ends)
           lockedSquaresRef.current.set(roundId, [...testSquares])
           setCurrentRound(roundId)
@@ -282,7 +282,7 @@ export default function Test20Page() {
     fetchData()
     const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
-  }, [recommendedSquares, currentRound])
+  }, [initialized]) // Only depend on initialized, not on state that changes frequently
 
   // Auto-scroll terminal
   useEffect(() => {
