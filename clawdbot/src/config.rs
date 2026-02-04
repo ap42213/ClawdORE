@@ -65,7 +65,11 @@ pub struct BettingConfig {
     /// Enable betting
     pub enabled: bool,
     
-    /// Percentage of available balance to bet per round
+    /// Fixed SOL amount per square (if set, overrides percentage-based calculation)
+    #[serde(default)]
+    pub sol_per_square: Option<f64>,
+    
+    /// Percentage of available balance to bet per round (used if sol_per_square is None)
     pub bet_percentage: f64,
     
     /// Maximum bet amount in SOL
@@ -197,9 +201,10 @@ impl Default for BettingConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            sol_per_square: Some(0.001), // Default: 0.001 SOL per square
             bet_percentage: 0.05,
             max_bet_sol: 0.5,
-            min_bet_sol: 0.01,
+            min_bet_sol: 0.001,
             risk_tolerance: 0.5,
             squares_to_bet: 3,
             strategy: "spread".to_string(),
@@ -319,6 +324,10 @@ impl BettingConfig {
             enabled: std::env::var("BETTING_ENABLED")
                 .map(|v| v == "true")
                 .unwrap_or(false),
+            sol_per_square: std::env::var("SOL_PER_SQUARE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .or(Some(0.001)), // Default 0.001 SOL per square
             bet_percentage: std::env::var("BET_PERCENTAGE")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -330,7 +339,7 @@ impl BettingConfig {
             min_bet_sol: std::env::var("MIN_BET_SOL")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(0.01),
+                .unwrap_or(0.001),
             risk_tolerance: std::env::var("RISK_TOLERANCE")
                 .ok()
                 .and_then(|v| v.parse().ok())

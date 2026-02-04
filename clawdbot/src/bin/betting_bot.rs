@@ -138,11 +138,17 @@ impl BettingBot {
             let balance = self.client.get_balance()?;
             let balance_sol = balance as f64 / 1_000_000_000.0;
 
-            let bet_amount_sol = (balance_sol * self.config.bet_percentage)
-                .clamp(self.config.min_bet_sol, self.config.max_bet_sol);
+            // Use fixed sol_per_square if set, otherwise calculate from percentage
+            let sol_per_square = self.config.sol_per_square.unwrap_or_else(|| {
+                (balance_sol * self.config.bet_percentage / self.config.squares_to_bet as f64)
+                    .clamp(self.config.min_bet_sol, self.config.max_bet_sol)
+            });
 
-            if bet_amount_sol < self.config.min_bet_sol {
-                warn!("⚠️  Insufficient balance: {:.4} SOL", balance_sol);
+            // Check we have enough balance for the planned bets
+            let required_balance = sol_per_square * self.config.squares_to_bet as f64;
+            if balance_sol < required_balance {
+                warn!("⚠️  Insufficient balance: {:.4} SOL (need {:.4} SOL for {} squares @ {:.4} SOL each)", 
+                      balance_sol, required_balance, self.config.squares_to_bet, sol_per_square);
                 sleep(Duration::from_secs(60)).await;
                 continue;
             }
@@ -159,41 +165,29 @@ impl BettingBot {
                 &round,
             )?;
 
-            let bets = self.strategy.calculate_bet_amounts(
-                &squares,
-                bet_amount_sol,
-                self.config.min_bet_sol,
-                self.config.max_bet_sol,
-            );
-
-            info!("🎯 Planned bets:");
-            for (square, amount) in &bets {
-                info!("  Square #{}: {:.4} SOL", square, amount);
+            info!("🎯 Betting on {} squares @ {:.4} SOL each:", squares.len(), sol_per_square);
+            for square in &squares {
+                info!("  Square #{}", square);
             }
 
-            let total_bet: f64 = bets.iter().map(|(_, amt)| amt).sum();
-            info!("💰 Total: {:.4} SOL across {} squares", total_bet, bets.len());
+            let total_bet = sol_per_square * squares.len() as f64;
+            info!("💰 Total: {:.4} SOL across {} squares", total_bet, squares.len());
 
-            // Convert bets to squares array and calculate lamports per square
+            // Convert squares to boolean array
             let mut squares_array = [false; 25];
-            for (square, _) in &bets {
+            for square in &squares {
                 if *square < 25 {
                     squares_array[*square] = true;
                 }
             }
             
-            // Calculate lamports per square (divide total by number of squares)
-            let num_squares = bets.len() as f64;
-            let lamports_per_square = if num_squares > 0.0 {
-                ((total_bet / num_squares) * 1_000_000_000.0) as u64
-            } else {
-                0
-            };
+            // Convert SOL to lamports
+            let lamports_per_square = (sol_per_square * 1_000_000_000.0) as u64;
 
             // Execute deploy transaction immediately!
             if lamports_per_square > 0 {
                 info!("🚀 Deploying {} lamports per square to {} squares...", 
-                      lamports_per_square, bets.len());
+                      lamports_per_square, squares.len());
                 
                 match self.client.deploy(lamports_per_square, squares_array) {
                     Ok(signature) => {
@@ -208,6 +202,7 @@ impl BettingBot {
                                 serde_json::json!({
                                     "round": current_round_id,
                                     "squares": squares,
+                                    "sol_per_square": sol_per_square,
                                     "total_bet_sol": total_bet,
                                     "lamports_per_square": lamports_per_square,
                                     "signature": signature.to_string(),
@@ -219,7 +214,7 @@ impl BettingBot {
                             db.set_state("last_betting_decision", serde_json::json!({
                                 "round": current_round_id,
                                 "squares": squares,
-                                "bets": bets.iter().map(|(s, a)| serde_json::json!({"square": s, "amount": a})).collect::<Vec<_>>(),
+                                "sol_per_square": sol_per_square,
                                 "total_bet": total_bet,
                                 "signature": signature.to_string(),
                                 "timestamp": chrono::Utc::now().to_rfc3339(),
