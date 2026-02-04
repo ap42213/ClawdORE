@@ -460,6 +460,17 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          {/* ORE Stats Link */}
+          <div className="mt-4">
+            <a 
+              href="/ore-stats" 
+              className="block w-full p-3 bg-purple-900/30 rounded-lg border border-purple-600/50 hover:bg-purple-900/50 transition-colors text-center"
+            >
+              <div className="text-purple-400 font-bold text-sm">📊 ORE Stats</div>
+              <div className="text-xs text-gray-400 mt-1">Live on-chain data</div>
+            </a>
+          </div>
           
           <div className="mt-6">
             <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-3">Legend</h2>
