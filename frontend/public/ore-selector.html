@@ -116,12 +116,45 @@
         code { background: #0a0a15; padding: 2px 6px; border-radius: 4px; }
         a { color: #00ff88; }
         .big-blocks { font-size: 28px; color: #ffd700; font-weight: bold; text-align: center; padding: 16px; background: rgba(255, 215, 0, 0.1); border-radius: 8px; margin: 12px 0; }
+        .hero-card { border: 2px solid #00ff88 !important; background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(20, 20, 30, 0.95)) !important; }
+        .badge { display: inline-block; background: #00ff88; color: #000; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-bottom: 12px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🦀 ORE Block Selector</h1>
         <p class="subtitle">Powered by ClawdORE - Autonomous Mining Swarm</p>
+
+        <!-- BEST OPTION: Userscript -->
+        <div class="card hero-card">
+            <span class="badge">✨ RECOMMENDED</span>
+            <h2 style="color: #00ff88;">⚡ One-Click Auto-Select (Tampermonkey)</h2>
+            <p>Install once, then just click a button on ore.supply to auto-fill recommendations!</p>
+            
+            <div class="instructions" style="background: rgba(0, 0, 0, 0.3); border-color: #00ff88;">
+                <h3 style="color: #00ff88;">Setup (one time only):</h3>
+                <ol>
+                    <li>Install <a href="https://www.tampermonkey.net/" target="_blank">Tampermonkey</a> browser extension</li>
+                    <li>Click the button below to install the ClawdORE script</li>
+                    <li>Done! A 🦀 button will appear on ore.supply</li>
+                </ol>
+            </div>
+            
+            <a href="/clawdore-userscript.js" 
+               style="display: block; text-align: center; background: linear-gradient(135deg, #00ff88, #00cc6a); color: #000; padding: 16px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 18px; margin-top: 16px;">
+                📥 Install ClawdORE Userscript
+            </a>
+            
+            <p style="margin-top: 12px; color: #888; font-size: 13px; text-align: center;">
+                After installing: Go to ore.supply → Click the 🦀 ClawdORE button → Blocks are auto-selected!
+            </p>
+        </div>
+
+        <!-- Alternative: Manual method -->
+        <div class="card">
+            <h2 style="color: #888;"><span class="step-number" style="background: #666;">Alt</span> Manual Method (No Extension)</h2>
+            <p style="color: #888;">If you can't install Tampermonkey, use the console script below:</p>
+        </div>
 
         <!-- Step 1: Get blocks from ClawdORE -->
         <div class="card" style="border-color: #ffd700;">
