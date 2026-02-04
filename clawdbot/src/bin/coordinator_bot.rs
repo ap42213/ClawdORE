@@ -465,6 +465,23 @@ async fn main() {
                                         }
                                     }
                                 }
+                                
+                                // TEST-20 TRACKING: Complete the round and record result
+                                match db.complete_test_20_round(last_round_id as i64, winning_square as i16).await {
+                                    Ok(is_hit) => {
+                                        if is_hit {
+                                            info!("📊 Test-20: ✅ Round {} HIT (winner {} in our top 20)", 
+                                                last_round_id, winning_square);
+                                        } else {
+                                            info!("📊 Test-20: ❌ Round {} MISS (winner {} was in skip list)", 
+                                                last_round_id, winning_square);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        // Not an error if round wasn't tracked (happens on startup)
+                                        info!("📊 Test-20: Round {} not tracked ({})", last_round_id, e);
+                                    }
+                                }
                             }
                         }
                         
@@ -791,6 +808,51 @@ async fn main() {
                             "optimal_count": optimal_count,
                             "count_reasoning": count_reasoning
                         })).await.ok();
+                        
+                        // TEST-20 TRACKING: Calculate best 20 squares and lock for this round
+                        // Score all 25 squares and pick the best 20 (worst 5 to skip)
+                        let mut square_scores: Vec<(i32, f64)> = (1..=25).map(|sq| {
+                            let mut score = 0.0;
+                            
+                            // Weight from strategies
+                            for r in &recommendations {
+                                if let Some(idx) = r.squares.iter().position(|&s| s == sq as usize) {
+                                    score += r.weights.get(idx).unwrap_or(&0.0) * r.confidence as f64 * 100.0;
+                                }
+                            }
+                            
+                            // Boost from consensus
+                            if consensus.squares.contains(&(sq as usize)) {
+                                score += 20.0 * consensus.confidence as f64;
+                            }
+                            
+                            // Slightly boost center squares (historically marginally better)
+                            if [7, 8, 9, 12, 13, 14, 17, 18, 19].contains(&sq) {
+                                score += 1.0;
+                            }
+                            
+                            (sq, score)
+                        }).collect();
+                        
+                        // Sort by score descending
+                        square_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                        
+                        // Best 20 to bet on, worst 5 to skip
+                        let betting_squares: Vec<i32> = square_scores.iter().take(20).map(|(sq, _)| *sq).collect();
+                        let skipping_squares: Vec<i32> = square_scores.iter().skip(20).map(|(sq, _)| *sq).collect();
+                        
+                        // Lock the picks for this round
+                        if let Err(e) = db.lock_test_20_round(
+                            current_round as i64,
+                            &betting_squares,
+                            &skipping_squares,
+                            consensus.confidence
+                        ).await {
+                            warn!("📊 Test-20: Failed to lock round {}: {}", current_round, e);
+                        } else {
+                            info!("📊 Test-20: 🔒 Locked picks for round {} - Betting: {:?}, Skipping: {:?}", 
+                                current_round, betting_squares, skipping_squares);
+                        }
                     }
                     
                     info!("");

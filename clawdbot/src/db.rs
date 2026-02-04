@@ -206,7 +206,20 @@ pub const SCHEMA_STATEMENTS: &[&str] = &[
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )"#,
     
+    // Test-20 tracking: Server-side tracking of best 20 square picks
+    r#"CREATE TABLE IF NOT EXISTS test_20_rounds (
+        round_id BIGINT PRIMARY KEY,
+        betting_squares INTEGER[] NOT NULL,
+        skipping_squares INTEGER[] NOT NULL,
+        winning_square SMALLINT,
+        is_hit BOOLEAN,
+        confidence REAL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        completed_at TIMESTAMPTZ
+    )"#,
+    
     // Indexes
+    "CREATE INDEX IF NOT EXISTS idx_test_20_completed ON test_20_rounds(completed_at) WHERE completed_at IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_transactions_signer ON transactions(signer)",
     "CREATE INDEX IF NOT EXISTS idx_transactions_round ON transactions(round_id)",
     "CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(instruction_type)",
@@ -796,6 +809,118 @@ impl SharedDb {
         .map_err(|e| BotError::Other(format!("Failed to complete round: {}", e)))?;
         
         Ok(())
+    }
+
+    // ==================== TEST-20 TRACKING METHODS ====================
+
+    /// Lock test-20 picks at round start (pick best 20 squares to bet on)
+    #[cfg(feature = "database")]
+    pub async fn lock_test_20_round(&self, round_id: i64, betting_squares: &[i32], skipping_squares: &[i32], confidence: f32) -> Result<()> {
+        sqlx::query(r#"
+            INSERT INTO test_20_rounds (round_id, betting_squares, skipping_squares, confidence)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (round_id) DO NOTHING
+        "#)
+        .bind(round_id)
+        .bind(betting_squares)
+        .bind(skipping_squares)
+        .bind(confidence)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to lock test-20 round: {}", e)))?;
+        
+        Ok(())
+    }
+
+    /// Complete test-20 round with result
+    #[cfg(feature = "database")]
+    pub async fn complete_test_20_round(&self, round_id: i64, winning_square: i16) -> Result<bool> {
+        // Get the locked round to check if hit
+        let result = sqlx::query_as::<_, (Vec<i32>,)>(r#"
+            SELECT betting_squares FROM test_20_rounds WHERE round_id = $1
+        "#)
+        .bind(round_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to get test-20 round: {}", e)))?;
+        
+        if let Some((betting_squares,)) = result {
+            let is_hit = betting_squares.contains(&(winning_square as i32));
+            
+            sqlx::query(r#"
+                UPDATE test_20_rounds 
+                SET winning_square = $2, is_hit = $3, completed_at = NOW()
+                WHERE round_id = $1
+            "#)
+            .bind(round_id)
+            .bind(winning_square)
+            .bind(is_hit)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| BotError::Other(format!("Failed to complete test-20 round: {}", e)))?;
+            
+            Ok(is_hit)
+        } else {
+            // Round wasn't tracked
+            Err(BotError::Other(format!("Test-20 round {} not found", round_id)))
+        }
+    }
+
+    /// Get test-20 statistics
+    #[cfg(feature = "database")]
+    pub async fn get_test_20_stats(&self) -> Result<serde_json::Value> {
+        let total: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM test_20_rounds WHERE is_hit IS NOT NULL"
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or((0,));
+        
+        let hits: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM test_20_rounds WHERE is_hit = true"
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or((0,));
+        
+        let win_rate = if total.0 > 0 { 
+            hits.0 as f64 / total.0 as f64 * 100.0 
+        } else { 
+            0.0 
+        };
+        
+        // Get recent results
+        let recent = sqlx::query_as::<_, (i64, i16, bool, Vec<i32>, Vec<i32>)>(r#"
+            SELECT round_id, COALESCE(winning_square, 0), COALESCE(is_hit, false), 
+                   betting_squares, skipping_squares
+            FROM test_20_rounds 
+            WHERE is_hit IS NOT NULL 
+            ORDER BY completed_at DESC 
+            LIMIT 50
+        "#)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        
+        let recent_results: Vec<serde_json::Value> = recent.iter().map(|(round_id, winning, is_hit, betting, skipping)| {
+            serde_json::json!({
+                "round_id": round_id,
+                "winning_square": winning,
+                "is_hit": is_hit,
+                "betting_squares": betting,
+                "skipping_squares": skipping
+            })
+        }).collect();
+        
+        Ok(serde_json::json!({
+            "total": total.0,
+            "hits": hits.0,
+            "misses": total.0 - hits.0,
+            "win_rate": win_rate,
+            "baseline": 80.0,
+            "edge": win_rate - 80.0,
+            "recent_results": recent_results
+        }))
     }
 
     /// Get learning summary
