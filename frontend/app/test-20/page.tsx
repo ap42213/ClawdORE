@@ -29,7 +29,10 @@ export default function Test20Page() {
   const [terminalPaused, setTerminalPaused] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
-  const seenRoundsRef = useRef<Set<number>>(new Set())
+  const startedRef = useRef(false)
+  // Track which squares were locked for which round
+  const lockedSquaresRef = useRef<Map<number, number[]>>(new Map())
+  const processedResultsRef = useRef<Set<number>>(new Set())
 
   const addLog = (bot: string, type: LogEntry['type'], message: string) => {
     const entry: LogEntry = {
@@ -47,109 +50,124 @@ export default function Test20Page() {
     return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
 
+  // Startup message - only once
+  useEffect(() => {
+    if (!startedRef.current) {
+      startedRef.current = true
+      addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
+    }
+  }, [])
+
   // Fetch live data
   useEffect(() => {
     const fetchData = async () => {
       try {
         // Fetch current state
         const stateRes = await fetch('/api/state')
-        if (stateRes.ok) {
-          const state = await stateRes.json()
-          
-          // Calculate scores for all 25 squares from backend data
-          const squareScores: Record<number, number> = {}
-          for (let sq = 1; sq <= 25; sq++) {
-            squareScores[sq] = 0
-          }
-          
-          // 1. Add scores from current_strategies (backend strategies with weights)
-          if (state.current_strategies && Array.isArray(state.current_strategies)) {
-            for (const strategy of state.current_strategies) {
-              const squares = strategy.squares || []
-              const weights = strategy.weights || []
-              const confidence = strategy.confidence || 0.5
-              
-              for (let i = 0; i < squares.length; i++) {
-                const sq = squares[i]
-                const weight = weights[i] || 0.1
-                if (sq >= 1 && sq <= 25) {
-                  squareScores[sq] += weight * confidence
-                }
-              }
-            }
-          }
-          
-          // 2. Add scores from analytics_predictions (top squares)
-          if (state.analytics_predictions?.top_squares) {
-            const topSquares = state.analytics_predictions.top_squares
-            const analyticsConfidence = state.analytics_predictions.confidence || 0.5
-            for (let i = 0; i < topSquares.length; i++) {
-              const sq = topSquares[i]
-              if (sq >= 1 && sq <= 25) {
-                // Higher score for higher ranked squares
-                squareScores[sq] += (topSquares.length - i) * analyticsConfidence * 0.1
-              }
-            }
-          }
-          
-          // 3. Add scores from consensus_recommendation
-          if (state.consensus_recommendation) {
-            const recSquares = state.consensus_recommendation.squares || []
-            const recWeights = state.consensus_recommendation.weights || []
-            const recConfidence = state.consensus_recommendation.confidence || 0.5
-            
-            for (let i = 0; i < recSquares.length; i++) {
-              const sq = recSquares[i]
-              const weight = recWeights[i] || 0.3
-              if (sq >= 1 && sq <= 25) {
-                squareScores[sq] += weight * recConfidence * 2 // Consensus gets extra weight
-              }
-            }
-          }
-          
-          // Sort squares by score (descending) and take best 20
-          const sortedSquares = Object.entries(squareScores)
-            .map(([sq, score]) => ({ square: Number(sq), score }))
-            .sort((a, b) => b.score - a.score)
-          
-          const testSquares = sortedSquares.slice(0, SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
-          const excludedSquares = sortedSquares.slice(SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
-          
-          if (JSON.stringify(testSquares) !== JSON.stringify(recommendedSquares)) {
-            setRecommendedSquares(testSquares)
-            addLog('TEST-20', 'decision', `🎯 Best ${SQUARE_COUNT} squares: [${testSquares.join(', ')}]`)
-            addLog('TEST-20', 'info', `🚫 Excluded (worst 5): [${excludedSquares.join(', ')}]`)
-          }
-          
-          if (state.current_round) {
-            const roundId = Number(state.current_round) || 0
-            if (roundId !== currentRound && roundId > 0) {
-              setCurrentRound(roundId)
-              addLog('ORE', 'info', `🆕 Round #${roundId} started`)
-            }
-          }
-          
-          setConnected(true)
+        if (!stateRes.ok) return
+        
+        const state = await stateRes.json()
+        
+        // Calculate scores for all 25 squares from backend data
+        const squareScores: Record<number, number> = {}
+        for (let sq = 1; sq <= 25; sq++) {
+          squareScores[sq] = 0
         }
-
-        // Fetch results
-        const resultsRes = await fetch('/api/results')
-        if (resultsRes.ok) {
-          const data = await resultsRes.json()
-          const results = data.results || []
+        
+        // 1. Add scores from current_strategies (backend strategies with weights)
+        if (state.current_strategies && Array.isArray(state.current_strategies)) {
+          for (const strategy of state.current_strategies) {
+            const squares = strategy.squares || []
+            const weights = strategy.weights || []
+            const confidence = strategy.confidence || 0.5
+            
+            for (let i = 0; i < squares.length; i++) {
+              const sq = squares[i]
+              const weight = weights[i] || 0.1
+              if (sq >= 1 && sq <= 25) {
+                squareScores[sq] += weight * confidence
+              }
+            }
+          }
+        }
+        
+        // 2. Add scores from analytics_predictions (top squares)
+        if (state.analytics_predictions?.top_squares) {
+          const topSquares = state.analytics_predictions.top_squares
+          const analyticsConfidence = state.analytics_predictions.confidence || 0.5
+          for (let i = 0; i < topSquares.length; i++) {
+            const sq = topSquares[i]
+            if (sq >= 1 && sq <= 25) {
+              squareScores[sq] += (topSquares.length - i) * analyticsConfidence * 0.1
+            }
+          }
+        }
+        
+        // 3. Add scores from consensus_recommendation
+        if (state.consensus_recommendation) {
+          const recSquares = state.consensus_recommendation.squares || []
+          const recWeights = state.consensus_recommendation.weights || []
+          const recConfidence = state.consensus_recommendation.confidence || 0.5
           
-          for (const result of results.slice(0, 20)) {
-            if (!seenRoundsRef.current.has(result.round_id)) {
-              seenRoundsRef.current.add(result.round_id)
+          for (let i = 0; i < recSquares.length; i++) {
+            const sq = recSquares[i]
+            const weight = recWeights[i] || 0.3
+            if (sq >= 1 && sq <= 25) {
+              squareScores[sq] += weight * recConfidence * 2
+            }
+          }
+        }
+        
+        // Sort squares by score (descending) and take best 20
+        const sortedSquares = Object.entries(squareScores)
+          .map(([sq, score]) => ({ square: Number(sq), score }))
+          .sort((a, b) => b.score - a.score)
+        
+        const testSquares = sortedSquares.slice(0, SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
+        const excludedSquares = sortedSquares.slice(SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
+        
+        // Update display squares
+        if (JSON.stringify(testSquares) !== JSON.stringify(recommendedSquares)) {
+          setRecommendedSquares(testSquares)
+          addLog('TEST-20', 'decision', `🎯 Best ${SQUARE_COUNT} squares: [${testSquares.join(', ')}]`)
+          addLog('TEST-20', 'info', `🚫 Excluded (worst 5): [${excludedSquares.join(', ')}]`)
+        }
+        
+        // Track current round and lock squares for it
+        const roundId = Number(state.current_round) || 0
+        if (roundId > 0 && roundId !== currentRound) {
+          // Lock current squares for this round (will be judged when round ends)
+          lockedSquaresRef.current.set(roundId, [...testSquares])
+          setCurrentRound(roundId)
+          addLog('ORE', 'info', `🆕 Round #${roundId} started - squares locked for scoring`)
+        }
+        
+        setConnected(true)
+
+        // Fetch results and judge against LOCKED squares (not current)
+        const resultsRes = await fetch('/api/results')
+        if (!resultsRes.ok) return
+        
+        const data = await resultsRes.json()
+        
+        // Use last_winner for simplest check
+        if (data.last_winner) {
+          const rid = Number(data.last_winner.round_id)
+          const winningSquare = Number(data.last_winner.winning_square)
+          
+          if (!processedResultsRef.current.has(rid) && winningSquare > 0) {
+            // Check if we have locked squares for this round
+            const lockedForRound = lockedSquaresRef.current.get(rid)
+            
+            if (lockedForRound && lockedForRound.length === SQUARE_COUNT) {
+              processedResultsRef.current.add(rid)
+              setLastWinner({ round_id: rid, winning_square: winningSquare })
               
-              const winningSquare = result.winning_square
-              setLastWinner({ round_id: result.round_id, winning_square: winningSquare })
-              
-              // Check if our 20 squares would have hit
-              const hit = recommendedSquares.includes(winningSquare)
+              // Judge against the squares we had LOCKED for this round
+              const hit = lockedForRound.includes(winningSquare)
               
               if (hit) {
-                addLog('RESULT', 'win', `✅ ROUND #${result.round_id} - Square ${winningSquare} - HIT! (${SQUARE_COUNT}/25 coverage)`)
+                addLog('RESULT', 'win', `✅ ROUND #${rid} - Square ${winningSquare} - HIT!`)
                 setStats(prev => ({
                   wins: prev.wins + 1,
                   losses: prev.losses,
@@ -157,13 +175,27 @@ export default function Test20Page() {
                   winRate: ((prev.wins + 1) / (prev.total + 1) * 100).toFixed(1)
                 }))
               } else {
-                addLog('RESULT', 'loss', `❌ ROUND #${result.round_id} - Square ${winningSquare} - MISS (not in our ${SQUARE_COUNT})`)
+                addLog('RESULT', 'loss', `❌ ROUND #${rid} - Square ${winningSquare} - MISS`)
                 setStats(prev => ({
                   wins: prev.wins,
                   losses: prev.losses + 1,
                   total: prev.total + 1,
                   winRate: (prev.wins / (prev.total + 1) * 100).toFixed(1)
                 }))
+              }
+              
+              // Clean up old locked squares (keep last 10)
+              if (lockedSquaresRef.current.size > 10) {
+                const keys = Array.from(lockedSquaresRef.current.keys()).sort((a, b) => a - b)
+                for (const key of keys.slice(0, keys.length - 10)) {
+                  lockedSquaresRef.current.delete(key)
+                }
+              }
+            } else {
+              // No locked squares for this round - just show the winner
+              if (!processedResultsRef.current.has(rid)) {
+                addLog('ORE', 'info', `⏭️ Round #${rid} completed - Square ${winningSquare} won (not tracked - page wasn't open)`)
+                processedResultsRef.current.add(rid)
               }
             }
           }
@@ -173,8 +205,6 @@ export default function Test20Page() {
         console.error('Fetch error:', e)
       }
     }
-
-    addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
     
     fetchData()
     const interval = setInterval(fetchData, 3000)
