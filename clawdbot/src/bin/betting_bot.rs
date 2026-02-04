@@ -132,13 +132,16 @@ impl BettingBot {
                     match self.client.checkpoint(old_round_id) {
                         Ok(sig) => {
                             info!("✅ Checkpointed round {}: {}", old_round_id, sig);
-                            // Small delay to let tx confirm
-                            sleep(Duration::from_millis(500)).await;
+                            // Wait for checkpoint to confirm before continuing
+                            info!("⏳ Waiting for checkpoint confirmation...");
+                            sleep(Duration::from_secs(3)).await;
                             
                             // Auto-claim SOL rewards after checkpoint
                             match self.client.claim_sol() {
                                 Ok(claim_sig) => {
                                     info!("💰 Claimed SOL rewards: {}", claim_sig);
+                                    // Wait for claim to confirm too
+                                    sleep(Duration::from_secs(2)).await;
                                 }
                                 Err(e) => {
                                     // Not an error - might have no rewards to claim
