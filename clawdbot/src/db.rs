@@ -923,6 +923,23 @@ impl SharedDb {
         }))
     }
 
+    /// Get historical win rates per square from rounds table
+    #[cfg(feature = "database")]
+    pub async fn get_square_win_rates(&self) -> Result<Vec<(i16, i64)>> {
+        let rates = sqlx::query_as::<_, (i16, i64)>(r#"
+            SELECT winning_square, COUNT(*) as wins
+            FROM rounds 
+            WHERE winning_square IS NOT NULL AND winning_square > 0
+            GROUP BY winning_square
+            ORDER BY winning_square
+        "#)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| BotError::Other(format!("Failed to get square win rates: {}", e)))?;
+        
+        Ok(rates)
+    }
+
     /// Get learning summary
     #[cfg(feature = "database")]
     pub async fn get_learning_summary(&self) -> Result<serde_json::Value> {

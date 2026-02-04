@@ -232,6 +232,34 @@ export default function Test20Page() {
             </div>
           </div>
 
+          {/* Current Betting Squares */}
+          {serverStats?.recent_results?.[0] && (
+            <div className="p-3 bg-green-900/20 rounded-lg border border-green-800/50 mb-4">
+              <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">🎯 Betting On (20)</h2>
+              <div className="flex flex-wrap gap-1">
+                {[...serverStats.recent_results[0].betting_squares].sort((a,b) => a-b).map(sq => (
+                  <span key={sq} className="bg-green-700 px-1.5 py-0.5 rounded text-xs font-mono">
+                    {sq}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Skipping Squares */}
+          {serverStats?.recent_results?.[0] && (
+            <div className="p-3 bg-red-900/20 rounded-lg border border-red-800/50 mb-4">
+              <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">🚫 Skipping (5)</h2>
+              <div className="flex flex-wrap gap-1">
+                {[...serverStats.recent_results[0].skipping_squares].sort((a,b) => a-b).map(sq => (
+                  <span key={sq} className="bg-red-700 px-1.5 py-0.5 rounded text-xs font-mono">
+                    {sq}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Last Winner */}
           {lastWinner && (
             <div className="p-3 bg-orange-900/20 rounded-lg border border-orange-800/50 mb-4">

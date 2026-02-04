@@ -809,32 +809,63 @@ async fn main() {
                             "count_reasoning": count_reasoning
                         })).await.ok();
                         
-                        // TEST-20 TRACKING: Calculate best 20 squares and lock for this round
-                        // Score all 25 squares and pick the best 20 (worst 5 to skip)
+                        // TEST-20 TRACKING: Calculate best 20 squares using REAL historical data
+                        // Get historical win rates from database
+                        let historical_wins: std::collections::HashMap<i16, i64> = 
+                            match db.get_square_win_rates().await {
+                                Ok(rates) => rates.into_iter().collect(),
+                                Err(_) => std::collections::HashMap::new(),
+                            };
+                        
+                        let total_historical: i64 = historical_wins.values().sum();
+                        
+                        // Score all 25 squares based on ACTUAL win rates + current round conditions
                         let mut square_scores: Vec<(i32, f64)> = (1..=25).map(|sq| {
                             let mut score = 0.0;
                             
-                            // Weight from strategies
-                            for r in &recommendations {
-                                if let Some(idx) = r.squares.iter().position(|&s| s == sq as usize) {
-                                    score += r.weights.get(idx).unwrap_or(&0.0) * r.confidence as f64 * 100.0;
+                            // 1. HISTORICAL WIN RATE (most important - actual data!)
+                            // Each square should win ~4% of the time (1/25)
+                            // Squares that win MORE than expected get higher scores
+                            if total_historical > 100 {  // Only use if we have enough data
+                                let sq_wins = *historical_wins.get(&(sq as i16)).unwrap_or(&0);
+                                let expected_wins = total_historical as f64 / 25.0;
+                                let actual_rate = sq_wins as f64;
+                                // Score based on deviation from expected
+                                // If square wins 20 times vs expected 12 = +8 score
+                                score += (actual_rate - expected_wins) * 5.0;
+                            }
+                            
+                            // 2. Current round competition (avoid whale-heavy squares)
+                            let sq_idx = (sq - 1) as usize;
+                            if sq_idx < 25 {
+                                let deployed_on_sq = current.deployed[sq_idx];
+                                // Heavy competition = lower score (we want to skip these)
+                                // Light competition = higher score (better odds if we win)
+                                if deployed_on_sq > 5_000_000_000 { // > 5 SOL
+                                    score -= 10.0;  // Heavy penalty
+                                } else if deployed_on_sq > 1_000_000_000 { // > 1 SOL
+                                    score -= 3.0;   // Moderate penalty
+                                } else if deployed_on_sq == 0 {
+                                    score += 2.0;   // Slight boost for empty squares
                                 }
                             }
                             
-                            // Boost from consensus
-                            if consensus.squares.contains(&(sq as usize)) {
-                                score += 20.0 * consensus.confidence as f64;
+                            // 3. Strategy recommendations (lower weight than historical)
+                            for r in &recommendations {
+                                if let Some(idx) = r.squares.iter().position(|&s| s == sq as usize) {
+                                    score += r.weights.get(idx).unwrap_or(&0.0) * r.confidence as f64 * 10.0;
+                                }
                             }
                             
-                            // Slightly boost center squares (historically marginally better)
-                            if [7, 8, 9, 12, 13, 14, 17, 18, 19].contains(&sq) {
-                                score += 1.0;
+                            // 4. Consensus recommendation
+                            if consensus.squares.contains(&(sq as usize)) {
+                                score += 5.0 * consensus.confidence as f64;
                             }
                             
                             (sq, score)
                         }).collect();
                         
-                        // Sort by score descending
+                        // Sort by score descending (highest = best to bet on)
                         square_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                         
                         // Best 20 to bet on, worst 5 to skip
