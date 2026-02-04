@@ -125,45 +125,64 @@ impl BettingBot {
             *last_round = current_round_id;
             drop(last_round);
 
-            // Check for coordinator recommendations
+            // Get squares from coordinator recommendations (database) or fall back to local strategy
+            let mut squares: Vec<usize> = Vec::new();
+            let mut confidence = 0.0;
+            
             #[cfg(feature = "database")]
             if let Some(ref db) = self.db {
                 if let Ok(Some(rec)) = db.get_state("consensus_recommendation").await {
-                    info!("📊 Coordinator recommends: {:?} (conf: {}%)",
-                        rec["squares"],
-                        rec["confidence"].as_f64().unwrap_or(0.0) * 100.0);
+                    confidence = rec["confidence"].as_f64().unwrap_or(0.0);
+                    if let Some(sq_array) = rec["squares"].as_array() {
+                        squares = sq_array.iter()
+                            .filter_map(|v| v.as_u64().map(|n| n as usize))
+                            .filter(|&s| s < 25)
+                            .collect();
+                    }
+                    if !squares.is_empty() {
+                        info!("📊 Using coordinator recommendation: {:?} (conf: {:.0}%)", 
+                              squares, confidence * 100.0);
+                    }
                 }
+            }
+
+            // Fall back to local strategy if no coordinator recommendation
+            if squares.is_empty() {
+                let round = self.client.get_round(current_round_id)?;
+                let history = self.client.get_rounds(current_round_id, 20)?
+                    .into_iter()
+                    .map(|(_, r)| r)
+                    .collect::<Vec<_>>();
+
+                squares = self.strategy.select_squares(
+                    self.config.squares_to_bet,
+                    &history,
+                    &round,
+                )?;
+                info!("🎲 Using local strategy (no coordinator): {:?}", squares);
+            }
+
+            // Skip if no squares to bet on
+            if squares.is_empty() {
+                warn!("⚠️  No squares selected, skipping round");
+                sleep(Duration::from_secs(5)).await;
+                continue;
             }
 
             let balance = self.client.get_balance()?;
             let balance_sol = balance as f64 / 1_000_000_000.0;
 
-            // Use fixed sol_per_square if set, otherwise calculate from percentage
-            let sol_per_square = self.config.sol_per_square.unwrap_or_else(|| {
-                (balance_sol * self.config.bet_percentage / self.config.squares_to_bet as f64)
-                    .clamp(self.config.min_bet_sol, self.config.max_bet_sol)
-            });
+            // Use fixed sol_per_square 
+            let sol_per_square = self.config.sol_per_square.unwrap_or(0.001);
 
-            // Check we have enough balance for the planned bets
-            let required_balance = sol_per_square * self.config.squares_to_bet as f64;
+            // Check we have enough balance
+            let required_balance = sol_per_square * squares.len() as f64;
             if balance_sol < required_balance {
                 warn!("⚠️  Insufficient balance: {:.4} SOL (need {:.4} SOL for {} squares @ {:.4} SOL each)", 
-                      balance_sol, required_balance, self.config.squares_to_bet, sol_per_square);
+                      balance_sol, required_balance, squares.len(), sol_per_square);
                 sleep(Duration::from_secs(60)).await;
                 continue;
             }
-
-            let round = self.client.get_round(current_round_id)?;
-            let history = self.client.get_rounds(current_round_id, 20)?
-                .into_iter()
-                .map(|(_, r)| r)
-                .collect::<Vec<_>>();
-
-            let squares = self.strategy.select_squares(
-                self.config.squares_to_bet,
-                &history,
-                &round,
-            )?;
 
             info!("🎯 Betting on {} squares @ {:.4} SOL each:", squares.len(), sol_per_square);
             for square in &squares {
