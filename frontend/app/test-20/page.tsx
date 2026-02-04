@@ -2,25 +2,50 @@
 
 import { useState, useEffect, useRef } from 'react'
 
-interface RoundData {
-  round_id: number
-  winning_square: number
-  our_picks: number[]
-  hit: boolean
+interface LogEntry {
+  id: number
   timestamp: string
+  bot: string
+  type: 'info' | 'win' | 'loss' | 'decision' | 'action'
+  message: string
 }
 
 const SQUARE_COUNT = 20
 
+const BOT_COLORS: Record<string, string> = {
+  'TEST-20': '#a855f7',
+  'ORE': '#ff6b35',
+  'RESULT': '#fbbf24',
+  'SYSTEM': '#64748b',
+}
+
 export default function Test20Page() {
+  const [logs, setLogs] = useState<LogEntry[]>([])
   const [currentRound, setCurrentRound] = useState<number>(0)
   const [recommendedSquares, setRecommendedSquares] = useState<number[]>([])
-  const [winningSquare, setWinningSquare] = useState<number | null>(null)
-  const [roundHistory, setRoundHistory] = useState<RoundData[]>([])
-  const [stats, setStats] = useState({ hits: 0, misses: 0, hitRate: 0, streak: 0, bestStreak: 0 })
-  const [loading, setLoading] = useState(true)
-  const [lastUpdate, setLastUpdate] = useState<string>('')
+  const [stats, setStats] = useState({ wins: 0, losses: 0, total: 0, winRate: '0' })
+  const [lastWinner, setLastWinner] = useState<{ round_id: number, winning_square: number } | null>(null)
+  const [connected, setConnected] = useState(false)
+  const [terminalPaused, setTerminalPaused] = useState(false)
+  const terminalRef = useRef<HTMLDivElement>(null)
+  const logIdRef = useRef(0)
   const seenRoundsRef = useRef<Set<number>>(new Set())
+
+  const addLog = (bot: string, type: LogEntry['type'], message: string) => {
+    const entry: LogEntry = {
+      id: logIdRef.current++,
+      timestamp: new Date().toISOString(),
+      bot,
+      type,
+      message,
+    }
+    setLogs(prev => [...prev.slice(-200), entry])
+  }
+
+  const formatTime = (iso: string) => {
+    const d = new Date(iso)
+    return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
 
   // Fetch live data
   useEffect(() => {
@@ -31,17 +56,80 @@ export default function Test20Page() {
         if (stateRes.ok) {
           const state = await stateRes.json()
           
+          // Calculate scores for all 25 squares from backend data
+          const squareScores: Record<number, number> = {}
+          for (let sq = 1; sq <= 25; sq++) {
+            squareScores[sq] = 0
+          }
+          
+          // 1. Add scores from current_strategies (backend strategies with weights)
+          if (state.current_strategies && Array.isArray(state.current_strategies)) {
+            for (const strategy of state.current_strategies) {
+              const squares = strategy.squares || []
+              const weights = strategy.weights || []
+              const confidence = strategy.confidence || 0.5
+              
+              for (let i = 0; i < squares.length; i++) {
+                const sq = squares[i]
+                const weight = weights[i] || 0.1
+                if (sq >= 1 && sq <= 25) {
+                  squareScores[sq] += weight * confidence
+                }
+              }
+            }
+          }
+          
+          // 2. Add scores from analytics_predictions (top squares)
+          if (state.analytics_predictions?.top_squares) {
+            const topSquares = state.analytics_predictions.top_squares
+            const analyticsConfidence = state.analytics_predictions.confidence || 0.5
+            for (let i = 0; i < topSquares.length; i++) {
+              const sq = topSquares[i]
+              if (sq >= 1 && sq <= 25) {
+                // Higher score for higher ranked squares
+                squareScores[sq] += (topSquares.length - i) * analyticsConfidence * 0.1
+              }
+            }
+          }
+          
+          // 3. Add scores from consensus_recommendation
           if (state.consensus_recommendation) {
-            const rec = state.consensus_recommendation
-            // Get squares (already 1-indexed from coordinator)
-            const squares = rec.squares || []
-            // Take first 20 squares
-            setRecommendedSquares(squares.slice(0, SQUARE_COUNT))
+            const recSquares = state.consensus_recommendation.squares || []
+            const recWeights = state.consensus_recommendation.weights || []
+            const recConfidence = state.consensus_recommendation.confidence || 0.5
+            
+            for (let i = 0; i < recSquares.length; i++) {
+              const sq = recSquares[i]
+              const weight = recWeights[i] || 0.3
+              if (sq >= 1 && sq <= 25) {
+                squareScores[sq] += weight * recConfidence * 2 // Consensus gets extra weight
+              }
+            }
+          }
+          
+          // Sort squares by score (descending) and take best 20
+          const sortedSquares = Object.entries(squareScores)
+            .map(([sq, score]) => ({ square: Number(sq), score }))
+            .sort((a, b) => b.score - a.score)
+          
+          const testSquares = sortedSquares.slice(0, SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
+          const excludedSquares = sortedSquares.slice(SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
+          
+          if (JSON.stringify(testSquares) !== JSON.stringify(recommendedSquares)) {
+            setRecommendedSquares(testSquares)
+            addLog('TEST-20', 'decision', `🎯 Best ${SQUARE_COUNT} squares: [${testSquares.join(', ')}]`)
+            addLog('TEST-20', 'info', `🚫 Excluded (worst 5): [${excludedSquares.join(', ')}]`)
           }
           
           if (state.current_round) {
-            setCurrentRound(state.current_round.round_id || 0)
+            const roundId = Number(state.current_round) || 0
+            if (roundId !== currentRound && roundId > 0) {
+              setCurrentRound(roundId)
+              addLog('ORE', 'info', `🆕 Round #${roundId} started`)
+            }
           }
+          
+          setConnected(true)
         }
 
         // Fetch results
@@ -50,245 +138,225 @@ export default function Test20Page() {
           const data = await resultsRes.json()
           const results = data.results || []
           
-          if (results.length > 0) {
-            const latest = results[0]
-            setWinningSquare(latest.winning_square)
-            
-            // Process new rounds
-            for (const result of results.slice(0, 50)) {
-              if (!seenRoundsRef.current.has(result.round_id)) {
-                seenRoundsRef.current.add(result.round_id)
-                
-                // Simulate 20-square picks for historical data
-                const simulatedPicks = recommendedSquares.length > 0 
-                  ? recommendedSquares 
-                  : Array.from({length: SQUARE_COUNT}, (_, i) => i + 1)
-                
-                const hit = simulatedPicks.includes(result.winning_square)
-                
-                setRoundHistory(prev => [{
-                  round_id: result.round_id,
-                  winning_square: result.winning_square,
-                  our_picks: simulatedPicks,
-                  hit,
-                  timestamp: result.created_at || new Date().toISOString()
-                }, ...prev].slice(0, 100))
+          for (const result of results.slice(0, 20)) {
+            if (!seenRoundsRef.current.has(result.round_id)) {
+              seenRoundsRef.current.add(result.round_id)
+              
+              const winningSquare = result.winning_square
+              setLastWinner({ round_id: result.round_id, winning_square })
+              
+              // Check if our 20 squares would have hit
+              const hit = recommendedSquares.includes(winningSquare)
+              
+              if (hit) {
+                addLog('RESULT', 'win', `✅ ROUND #${result.round_id} - Square ${winningSquare} - HIT! (${SQUARE_COUNT}/25 coverage)`)
+                setStats(prev => ({
+                  wins: prev.wins + 1,
+                  losses: prev.losses,
+                  total: prev.total + 1,
+                  winRate: ((prev.wins + 1) / (prev.total + 1) * 100).toFixed(1)
+                }))
+              } else {
+                addLog('RESULT', 'loss', `❌ ROUND #${result.round_id} - Square ${winningSquare} - MISS (not in our ${SQUARE_COUNT})`)
+                setStats(prev => ({
+                  wins: prev.wins,
+                  losses: prev.losses + 1,
+                  total: prev.total + 1,
+                  winRate: (prev.wins / (prev.total + 1) * 100).toFixed(1)
+                }))
               }
             }
           }
         }
-
-        setLastUpdate(new Date().toLocaleTimeString())
-        setLoading(false)
       } catch (e) {
+        setConnected(false)
         console.error('Fetch error:', e)
       }
     }
 
+    addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
+    
     fetchData()
     const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
-  }, [recommendedSquares])
+  }, [recommendedSquares, currentRound])
 
-  // Calculate stats
+  // Auto-scroll terminal
   useEffect(() => {
-    if (roundHistory.length === 0) return
-    
-    const hits = roundHistory.filter(r => r.hit).length
-    const total = roundHistory.length
-    const hitRate = total > 0 ? (hits / total * 100) : 0
-    
-    // Calculate current streak
-    let streak = 0
-    for (const r of roundHistory) {
-      if (r.hit) streak++
-      else break
+    if (terminalRef.current && !terminalPaused) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight
     }
-    
-    // Calculate best streak
-    let bestStreak = 0
-    let currentStreak = 0
-    for (const r of roundHistory) {
-      if (r.hit) {
-        currentStreak++
-        bestStreak = Math.max(bestStreak, currentStreak)
-      } else {
-        currentStreak = 0
-      }
-    }
-    
-    setStats({ hits, misses: total - hits, hitRate, streak, bestStreak })
-  }, [roundHistory])
+  }, [logs, terminalPaused])
 
-  // Render 5x5 grid
-  const renderGrid = () => {
-    const squares = []
-    for (let i = 1; i <= 25; i++) {
-      const isRecommended = recommendedSquares.includes(i)
-      const isWinner = winningSquare === i
-      const isHit = isRecommended && isWinner
-      
-      let bgColor = 'bg-gray-800'
-      let borderColor = 'border-gray-700'
-      
-      if (isHit) {
-        bgColor = 'bg-green-500'
-        borderColor = 'border-green-400'
-      } else if (isWinner) {
-        bgColor = 'bg-red-500'
-        borderColor = 'border-red-400'
-      } else if (isRecommended) {
-        bgColor = 'bg-blue-600'
-        borderColor = 'border-blue-400'
-      }
-      
-      squares.push(
-        <div
-          key={i}
-          className={`${bgColor} ${borderColor} border-2 rounded-lg flex items-center justify-center font-bold text-lg transition-all duration-300 aspect-square`}
-        >
-          {i}
-        </div>
-      )
+  const getTypeStyle = (type: LogEntry['type']) => {
+    switch (type) {
+      case 'win': return 'text-green-400 font-bold'
+      case 'loss': return 'text-red-400 font-bold'
+      case 'action': return 'text-blue-400'
+      case 'decision': return 'text-yellow-400'
+      default: return 'text-gray-400'
     }
-    return squares
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-blue-400">🎯 20-Square Test Mode</h1>
-            <p className="text-gray-400 mt-1">Testing {SQUARE_COUNT}/25 square coverage strategy</p>
+    <main className="min-h-screen bg-[#0a0a0f] text-white font-mono">
+      {/* Header */}
+      <header className="border-b border-gray-800 px-6 py-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">
+              <span className="text-purple-500">🎯</span> 20-Square Test
+            </h1>
+            <span className="text-gray-500 text-sm">Testing {SQUARE_COUNT}/25 Coverage</span>
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-mono text-yellow-400">Round #{currentRound}</div>
-            <div className="text-sm text-gray-500">Updated: {lastUpdate}</div>
+          <div className="flex items-center gap-6 text-sm">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+              <span className="text-gray-400">{connected ? 'Connected' : 'Offline'}</span>
+            </div>
+            <div className="text-gray-500">
+              Round <span className="text-white font-bold">#{currentRound || '—'}</span>
+            </div>
           </div>
         </div>
+      </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Left: Grid */}
-          <div>
-            <h2 className="text-xl font-bold mb-4">Live Board</h2>
-            <div className="grid grid-cols-5 gap-2 mb-4">
-              {renderGrid()}
-            </div>
-            <div className="flex gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-blue-600 rounded"></div>
-                <span>Selected ({recommendedSquares.length})</span>
+      <div className="max-w-6xl mx-auto p-6 flex gap-6">
+        {/* Sidebar */}
+        <aside className="w-48 flex-shrink-0">
+          {/* Stats */}
+          <div className="p-3 bg-gray-900/50 rounded-lg border border-gray-800 mb-4">
+            <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Win/Loss Stats</h2>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Win Rate</span>
+                <span className="text-yellow-400 font-bold text-lg">
+                  {stats.winRate}%
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-red-500 rounded"></div>
-                <span>Winner (missed)</span>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Record</span>
+                <span>
+                  <span className="text-green-400 font-bold">{stats.wins}W</span>
+                  <span className="text-gray-600"> / </span>
+                  <span className="text-red-400 font-bold">{stats.losses}L</span>
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-green-500 rounded"></div>
-                <span>HIT! 🎉</span>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Total</span>
+                <span className="text-white">{stats.total}</span>
               </div>
             </div>
           </div>
 
-          {/* Right: Stats */}
-          <div>
-            <h2 className="text-xl font-bold mb-4">Win/Loss Statistics</h2>
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div className="bg-gray-800 rounded-lg p-4 text-center">
-                <div className="text-4xl font-bold text-green-400">{stats.hits}</div>
-                <div className="text-gray-400 font-bold">WINS</div>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-4 text-center">
-                <div className="text-4xl font-bold text-red-400">{stats.misses}</div>
-                <div className="text-gray-400 font-bold">LOSSES</div>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-4 text-center">
-                <div className="text-4xl font-bold text-yellow-400">{stats.hitRate.toFixed(1)}%</div>
-                <div className="text-gray-400 font-bold">WIN %</div>
-              </div>
+          {/* Coverage */}
+          <div className="p-3 bg-purple-900/30 rounded-lg border border-purple-600/50 mb-4">
+            <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Coverage</h2>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-purple-400">{SQUARE_COUNT}/25</div>
+              <div className="text-sm text-gray-400">80% Expected</div>
             </div>
-            
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-gray-800 rounded-lg p-4 text-center">
-                <div className="text-2xl font-bold text-blue-400">{stats.hits + stats.misses}</div>
-                <div className="text-gray-400">Total Rounds</div>
-              </div>
-              <div className="bg-gray-800 rounded-lg p-4 text-center">
-                <div className="text-2xl font-bold text-purple-400">{stats.streak}</div>
-                <div className="text-gray-400">Win Streak</div>
-                <div className="text-xs text-gray-500">Best: {stats.bestStreak}</div>
-              </div>
-            </div>
+          </div>
 
-            <div className="bg-gray-800 rounded-lg p-4 mb-4">
-              <div className="text-lg font-bold mb-2">Coverage Analysis</div>
-              <div className="text-sm text-gray-400">
-                <p>Selecting {SQUARE_COUNT} of 25 squares = {(SQUARE_COUNT/25*100).toFixed(0)}% coverage</p>
-                <p className="mt-1">Theoretical hit rate: {(SQUARE_COUNT/25*100).toFixed(0)}%</p>
-                <p className="mt-1">Actual hit rate: {stats.hitRate.toFixed(1)}%</p>
-                <p className={`mt-2 font-bold ${stats.hitRate >= 80 ? 'text-green-400' : 'text-yellow-400'}`}>
-                  {stats.hitRate >= 80 ? '✅ On target!' : '⚠️ Below expected'}
-                </p>
+          {/* Current Squares */}
+          <div className="p-3 bg-gray-900/50 rounded-lg border border-gray-800 mb-4">
+            <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Testing Squares</h2>
+            <div className="flex flex-wrap gap-1">
+              {recommendedSquares.map(sq => (
+                <span key={sq} className="bg-purple-600 px-1.5 py-0.5 rounded text-xs font-mono">
+                  {sq}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Last Winner */}
+          {lastWinner && (
+            <div className="p-3 bg-orange-900/20 rounded-lg border border-orange-800/50 mb-4">
+              <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Last Winner</h2>
+              <div className="text-center">
+                <div className="text-2xl font-bold" style={{ color: '#ff6b35' }}>
+                  □ {lastWinner.winning_square}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Round #{lastWinner.round_id}
+                </div>
+                <div className={`text-sm mt-1 font-bold ${
+                  recommendedSquares.includes(lastWinner.winning_square) ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {recommendedSquares.includes(lastWinner.winning_square) ? '✅ HIT' : '❌ MISS'}
+                </div>
               </div>
             </div>
+          )}
 
-            <div className="bg-gray-800 rounded-lg p-4">
-              <div className="text-lg font-bold mb-2">Selected Squares</div>
-              <div className="flex flex-wrap gap-2">
-                {recommendedSquares.map(sq => (
-                  <span key={sq} className="bg-blue-600 px-2 py-1 rounded text-sm font-mono">
-                    {sq}
+          {/* Back link */}
+          <a href="/" className="block text-center text-purple-400 hover:underline text-sm">
+            ← Back to Dashboard
+          </a>
+        </aside>
+
+        {/* Terminal */}
+        <div className="flex-1 bg-[#0d0d14] rounded-lg border border-gray-800 overflow-hidden">
+          {/* Terminal Header */}
+          <div className="flex items-center justify-between px-4 py-2 bg-[#12121a] border-b border-gray-800">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500/80" />
+              <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+              <div className="w-3 h-3 rounded-full bg-green-500/80" />
+            </div>
+            <span className="text-xs text-gray-500">test-20 — live feed</span>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setTerminalPaused(!terminalPaused)}
+                className={`text-xs px-3 py-1 rounded transition-colors ${
+                  terminalPaused 
+                    ? 'bg-yellow-600 text-black font-bold' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {terminalPaused ? '▶ Resume' : '⏸ Pause'}
+              </button>
+              <div className="text-xs text-gray-600">{logs.length} events</div>
+            </div>
+          </div>
+
+          {/* Terminal Content */}
+          <div ref={terminalRef} className="h-[560px] overflow-y-auto p-4 text-sm leading-relaxed">
+            {logs.length === 0 ? (
+              <div className="text-gray-600 animate-pulse">
+                Starting 20-square test...
+              </div>
+            ) : (
+              logs.map(log => (
+                <div key={log.id} className="flex gap-3 hover:bg-gray-900/30 py-0.5 px-1 -mx-1 rounded">
+                  <span className="text-gray-600 flex-shrink-0 w-20">
+                    {formatTime(log.timestamp)}
                   </span>
-                ))}
-              </div>
-            </div>
+                  <span 
+                    className="flex-shrink-0 w-24 truncate"
+                    style={{ color: BOT_COLORS[log.bot] || '#888' }}
+                  >
+                    [{log.bot}]
+                  </span>
+                  <span className={getTypeStyle(log.type)}>
+                    {log.message}
+                  </span>
+                </div>
+              ))
+            )}
+            <div className="text-green-500 animate-pulse mt-2">▋</div>
           </div>
-        </div>
-
-        {/* History */}
-        <div className="mt-8">
-          <h2 className="text-xl font-bold mb-4">Recent Rounds</h2>
-          <div className="bg-gray-800 rounded-lg overflow-hidden">
-            <div className="max-h-64 overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-700 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Round</th>
-                    <th className="px-4 py-2 text-left">Winner</th>
-                    <th className="px-4 py-2 text-left">Result</th>
-                    <th className="px-4 py-2 text-left">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {roundHistory.slice(0, 20).map(r => (
-                    <tr key={r.round_id} className={r.hit ? 'bg-green-900/30' : 'bg-red-900/30'}>
-                      <td className="px-4 py-2 font-mono">#{r.round_id}</td>
-                      <td className="px-4 py-2 font-mono">{r.winning_square}</td>
-                      <td className="px-4 py-2">
-                        {r.hit ? (
-                          <span className="text-green-400">✅ HIT</span>
-                        ) : (
-                          <span className="text-red-400">❌ MISS</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-gray-400">
-                        {new Date(r.timestamp).toLocaleTimeString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        {/* Back link */}
-        <div className="mt-8 text-center">
-          <a href="/" className="text-blue-400 hover:underline">← Back to main dashboard</a>
         </div>
       </div>
-    </div>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-800 px-6 py-4 mt-4">
+        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs text-gray-600">
+          <span>ClawdORE • 20-Square Coverage Test</span>
+          <span>Expected: 80% Win Rate</span>
+        </div>
+      </footer>
+    </main>
   )
 }
