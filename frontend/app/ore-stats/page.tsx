@@ -35,11 +35,26 @@ interface LiveRoundData {
 }
 
 interface ProtocolStats {
-  treasury_balance_sol: number
-  motherlode_sol: number
-  total_staked_ore: number
-  ore_price_usd: number | null
-  sol_price_usd: number | null
+  treasury_balance_sol?: number
+  motherlode_sol?: number
+  total_staked_ore?: number
+  ore_price_usd?: number | null
+  sol_price_usd?: number | null
+  // Database-sourced stats
+  total_rounds_completed?: number
+  total_sol_deployed?: number
+  total_motherlode_rounds?: number
+  motherlode_rate?: number
+  avg_deployment_per_round?: number
+  tracked_whales?: number
+  bot_stats?: {
+    unique_strategies: number
+    total_predictions: number
+    total_hits: number
+    hit_rate: number
+    avg_confidence: number
+  }
+  source?: string
 }
 
 interface RoundHistory {
@@ -56,7 +71,11 @@ interface RoundHistory {
 interface SquareAnalysis {
   square_num: number
   times_won: number
+  total_rounds?: number
   win_rate: number
+  edge?: number
+  streak?: number
+  avg_competition?: number
   recommendation: string
 }
 
@@ -259,25 +278,69 @@ export default function OreStatsPage() {
         {/* Protocol Stats */}
         {protocol && (
           <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700 mb-8">
-            <h2 className="text-lg font-bold text-purple-400 mb-4">Protocol Stats</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-purple-400">Protocol Stats</h2>
+              {protocol.source && (
+                <span className={`text-xs px-2 py-1 rounded ${
+                  protocol.source === 'database' ? 'bg-green-900 text-green-400' : 'bg-gray-700 text-gray-400'
+                }`}>
+                  {protocol.source === 'database' ? '✓ From Database' : 'No Data'}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
               <div>
-                <div className="text-2xl font-bold text-green-400">{formatSol(protocol.treasury_balance_sol)} SOL</div>
-                <div className="text-xs text-gray-400">Treasury Balance</div>
+                <div className="text-2xl font-bold text-green-400">{protocol.total_rounds_completed || 0}</div>
+                <div className="text-xs text-gray-400">Rounds Tracked</div>
               </div>
               <div>
-                <div className="text-2xl font-bold text-yellow-400">{formatSol(protocol.motherlode_sol)} SOL</div>
-                <div className="text-xs text-gray-400">Motherlode Pool</div>
+                <div className="text-2xl font-bold text-yellow-400">{formatSol(protocol.total_sol_deployed || 0)} SOL</div>
+                <div className="text-xs text-gray-400">Total SOL Deployed</div>
               </div>
               <div>
-                <div className="text-2xl font-bold text-purple-400">{(protocol.total_staked_ore / 1e11).toFixed(2)} ORE</div>
-                <div className="text-xs text-gray-400">Total Staked</div>
+                <div className="text-2xl font-bold text-purple-400">{protocol.total_motherlode_rounds || 0}</div>
+                <div className="text-xs text-gray-400">Motherlode Rounds</div>
               </div>
               <div>
-                <div className="text-2xl font-bold text-cyan-400">4%</div>
-                <div className="text-xs text-gray-400">Win Probability</div>
+                <div className="text-2xl font-bold text-cyan-400">{formatPercent((protocol.motherlode_rate || 0) * 100)}%</div>
+                <div className="text-xs text-gray-400">Motherlode Rate</div>
               </div>
             </div>
+            
+            {/* Bot Performance */}
+            {protocol.bot_stats && protocol.bot_stats.total_predictions > 0 && (
+              <div className="border-t border-gray-700 pt-4">
+                <h3 className="text-sm font-bold text-purple-400 mb-3">🤖 Bot Learning Stats</h3>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div>
+                    <div className="text-xl font-bold text-blue-400">{protocol.bot_stats.unique_strategies}</div>
+                    <div className="text-xs text-gray-400">Strategies</div>
+                  </div>
+                  <div>
+                    <div className="text-xl font-bold text-green-400">{protocol.bot_stats.total_predictions}</div>
+                    <div className="text-xs text-gray-400">Predictions</div>
+                  </div>
+                  <div>
+                    <div className="text-xl font-bold text-yellow-400">{protocol.bot_stats.total_hits}</div>
+                    <div className="text-xs text-gray-400">Hits</div>
+                  </div>
+                  <div>
+                    <div className="text-xl font-bold text-purple-400">{formatPercent(protocol.bot_stats.hit_rate * 100)}%</div>
+                    <div className="text-xs text-gray-400">Hit Rate</div>
+                  </div>
+                  <div>
+                    <div className="text-xl font-bold text-cyan-400">{formatPercent(protocol.bot_stats.avg_confidence * 100)}%</div>
+                    <div className="text-xs text-gray-400">Avg Confidence</div>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {protocol.tracked_whales !== undefined && protocol.tracked_whales > 0 && (
+              <div className="mt-4 text-sm text-gray-400">
+                🐋 Tracking {protocol.tracked_whales} whales
+              </div>
+            )}
           </div>
         )}
 
