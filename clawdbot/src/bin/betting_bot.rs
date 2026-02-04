@@ -207,19 +207,22 @@ impl BettingBot {
                 continue;
             }
 
-            info!("🎯 Betting on {} squares @ {:.4} SOL each:", squares.len(), sol_per_square);
+            info!("🎯 Betting on {} squares @ {:.4} SOL each (1-indexed for ORE UI):", squares.len(), sol_per_square);
             for square in &squares {
-                info!("  Square #{}", square);
+                info!("  Square #{} (UI) → internal index {}", square, square.saturating_sub(1));
             }
 
             let total_bet = sol_per_square * squares.len() as f64;
             info!("💰 Total: {:.4} SOL across {} squares", total_bet, squares.len());
 
             // Convert squares to boolean array
+            // Note: Coordinator sends 1-25 (1-indexed), but ore-api needs 0-24 (0-indexed)
             let mut squares_array = [false; 25];
             for square in &squares {
-                if *square < 25 {
-                    squares_array[*square] = true;
+                // Convert 1-indexed (1-25) to 0-indexed (0-24)
+                let idx = if *square > 0 { square - 1 } else { *square };
+                if idx < 25 {
+                    squares_array[idx] = true;
                 }
             }
             

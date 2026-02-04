@@ -51,12 +51,14 @@ impl BettingStrategy {
     }
 
     /// Random square selection
+    /// Returns 1-indexed squares (1-25) to match ORE UI and coordinator output
     fn random_selection(&self, num_squares: usize) -> Result<Vec<usize>> {
         let mut rng = thread_rng();
         let mut squares = Vec::new();
         
         while squares.len() < num_squares {
-            let square = rng.gen_range(0..BOARD_SIZE);
+            // Generate 0-indexed internally, but store as 1-indexed
+            let square = rng.gen_range(0..BOARD_SIZE) + 1; // 1-25
             if !squares.contains(&square) {
                 squares.push(square);
             }
@@ -67,6 +69,7 @@ impl BettingStrategy {
 
     /// Cryptographically secure random selection using entropy
     /// Use this for high-stakes betting to ensure true randomness
+    /// Returns 1-indexed squares (1-25) to match ORE UI
     pub fn secure_random_selection(&self, num_squares: usize, seed: Option<[u8; 32]>) -> Result<Vec<usize>> {
         let mut rng = if let Some(s) = seed {
             StdRng::from_seed(s)
@@ -76,7 +79,8 @@ impl BettingStrategy {
         
         let mut squares = Vec::new();
         while squares.len() < num_squares {
-            let square = rng.gen_range(0..BOARD_SIZE);
+            // Generate 0-indexed internally, but store as 1-indexed (1-25)
+            let square = rng.gen_range(0..BOARD_SIZE) + 1;
             if !squares.contains(&square) {
                 squares.push(square);
             }
