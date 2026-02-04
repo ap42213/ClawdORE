@@ -143,7 +143,7 @@ export default function Test20Page() {
               seenRoundsRef.current.add(result.round_id)
               
               const winningSquare = result.winning_square
-              setLastWinner({ round_id: result.round_id, winning_square })
+              setLastWinner({ round_id: result.round_id, winning_square: winningSquare })
               
               // Check if our 20 squares would have hit
               const hit = recommendedSquares.includes(winningSquare)
