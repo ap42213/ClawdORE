@@ -200,7 +200,8 @@ export default function Test20Page() {
           // Lock current squares for this round (will be judged when round ends)
           lockedSquaresRef.current.set(roundId, [...testSquares])
           setCurrentRound(roundId)
-          addLog('ORE', 'info', `🆕 Round #${roundId} started - squares locked for scoring`)
+          addLog('ORE', 'action', `🆕 Round #${roundId} started`)
+          addLog('ORE', 'info', `🔒 Locked: [${testSquares.join(', ')}]`)
         }
         
         setConnected(true)
@@ -226,9 +227,11 @@ export default function Test20Page() {
               
               // Judge against the squares we had LOCKED for this round
               const hit = lockedForRound.includes(winningSquare)
+              const excluded = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25].filter(s => !lockedForRound.includes(s))
               
               if (hit) {
-                addLog('RESULT', 'win', `✅ ROUND #${rid} - Square ${winningSquare} - HIT!`)
+                addLog('RESULT', 'win', `✅ ROUND #${rid} - Winner: □${winningSquare} - HIT!`)
+                addLog('RESULT', 'info', `   Our picks: [${lockedForRound.join(', ')}]`)
                 setStats(prev => ({
                   wins: prev.wins + 1,
                   losses: prev.losses,
@@ -236,7 +239,8 @@ export default function Test20Page() {
                   winRate: ((prev.wins + 1) / (prev.total + 1) * 100).toFixed(1)
                 }))
               } else {
-                addLog('RESULT', 'loss', `❌ ROUND #${rid} - Square ${winningSquare} - MISS`)
+                addLog('RESULT', 'loss', `❌ ROUND #${rid} - Winner: □${winningSquare} - MISS!`)
+                addLog('RESULT', 'info', `   We excluded: [${excluded.join(', ')}] - □${winningSquare} was in there!`)
                 setStats(prev => ({
                   wins: prev.wins,
                   losses: prev.losses + 1,
