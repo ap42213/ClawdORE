@@ -195,11 +195,9 @@ export default function Test20Page() {
         const testSquares = sortedSquares.slice(0, SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
         const excludedSquares = sortedSquares.slice(SQUARE_COUNT).map(s => s.square).sort((a, b) => a - b)
         
-        // Update display squares (use ref to check current value)
+        // Update display squares silently (no log spam - only log when locked for round)
         if (JSON.stringify(testSquares) !== JSON.stringify(recommendedSquaresRef.current)) {
           setRecommendedSquares(testSquares)
-          addLog('TEST-20', 'decision', `🎯 Best ${SQUARE_COUNT} squares: [${testSquares.join(', ')}]`)
-          addLog('TEST-20', 'info', `🚫 Excluded (worst 5): [${excludedSquares.join(', ')}]`)
         }
         
         // Track current round and lock squares for it (use ref to check current value)
@@ -209,7 +207,8 @@ export default function Test20Page() {
           lockedSquaresRef.current.set(roundId, [...testSquares])
           setCurrentRound(roundId)
           addLog('ORE', 'action', `🆕 Round #${roundId} started`)
-          addLog('ORE', 'info', `🔒 Locked: [${testSquares.join(', ')}]`)
+          addLog('ORE', 'decision', `🔒 Betting: [${testSquares.join(', ')}]`)
+          addLog('ORE', 'info', `🚫 Skipping: [${excludedSquares.join(', ')}]`)
         }
         
         setConnected(true)
