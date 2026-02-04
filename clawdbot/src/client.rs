@@ -157,6 +157,29 @@ impl OreClient {
         Ok(rounds)
     }
 
+    /// Claim SOL rewards from the miner account
+    /// Returns transaction signature
+    pub fn claim_sol(&self) -> Result<Signature> {
+        info!("💰 Claiming SOL rewards...");
+        
+        let claim_ix = ore_api::sdk::claim_sol(self.keypair.pubkey());
+        
+        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(200_000);
+        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
+        
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[compute_limit_ix, compute_price_ix, claim_ix],
+            Some(&self.keypair.pubkey()),
+            &[&*self.keypair],
+            recent_blockhash,
+        );
+        
+        let signature = self.rpc_client.send_transaction(&transaction)?;
+        info!("💰 Claim SOL tx sent: {}", signature);
+        Ok(signature)
+    }
+
     /// Checkpoint a miner for a specific round to claim rewards
     /// This must be called after each round before deploying to the next one
     pub fn checkpoint(&self, round_id: u64) -> Result<Signature> {
