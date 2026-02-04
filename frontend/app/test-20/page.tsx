@@ -105,17 +105,25 @@ export default function Test20Page() {
     return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
 
-  // Startup message - only once
+  // Startup message - only once (check logs to avoid duplicates)
   useEffect(() => {
-    if (!startedRef.current && initialized) {
+    if (!initialized) return
+    if (startedRef.current) return
+    
+    // Check if we already have a startup message in logs
+    const hasStartupMsg = logs.some(l => l.message.includes('20-Square Test Mode') || l.message.includes('Restored:'))
+    if (hasStartupMsg) {
       startedRef.current = true
-      if (stats.total > 0) {
-        addLog('SYSTEM', 'info', `📊 Restored: ${stats.wins}W/${stats.losses}L (${stats.winRate}%)`)
-      } else {
-        addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
-      }
+      return
     }
-  }, [initialized])
+    
+    startedRef.current = true
+    if (stats.total > 0) {
+      addLog('SYSTEM', 'info', `📊 Restored: ${stats.wins}W/${stats.losses}L (${stats.winRate}%)`)
+    } else {
+      addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
+    }
+  }, [initialized, logs.length])
 
   // Fetch live data
   useEffect(() => {
