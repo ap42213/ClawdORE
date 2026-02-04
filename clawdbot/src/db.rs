@@ -317,6 +317,10 @@ pub enum SignalType {
     PriceAlert,
     /// Bot health check
     Heartbeat,
+    /// Bet/deploy transaction placed
+    BetPlaced,
+    /// Error occurred
+    Error,
     /// Custom signal
     Custom,
 }
@@ -334,6 +338,8 @@ impl std::fmt::Display for SignalType {
             SignalType::ColdSquare => write!(f, "cold_square"),
             SignalType::PriceAlert => write!(f, "price_alert"),
             SignalType::Heartbeat => write!(f, "heartbeat"),
+            SignalType::BetPlaced => write!(f, "bet_placed"),
+            SignalType::Error => write!(f, "error"),
             SignalType::Custom => write!(f, "custom"),
         }
     }

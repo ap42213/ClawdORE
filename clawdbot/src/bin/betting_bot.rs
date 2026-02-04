@@ -174,19 +174,80 @@ impl BettingBot {
             let total_bet: f64 = bets.iter().map(|(_, amt)| amt).sum();
             info!("💰 Total: {:.4} SOL across {} squares", total_bet, bets.len());
 
-            // Log bets to database
-            #[cfg(feature = "database")]
-            if let Some(ref db) = self.db {
-                db.set_state("last_betting_decision", serde_json::json!({
-                    "round": current_round_id,
-                    "squares": squares,
-                    "bets": bets.iter().map(|(s, a)| serde_json::json!({"square": s, "amount": a})).collect::<Vec<_>>(),
-                    "total_bet": total_bet,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                })).await.ok();
+            // Convert bets to squares array and calculate lamports per square
+            let mut squares_array = [false; 25];
+            for (square, _) in &bets {
+                if *square < 25 {
+                    squares_array[*square] = true;
+                }
+            }
+            
+            // Calculate lamports per square (divide total by number of squares)
+            let num_squares = bets.len() as f64;
+            let lamports_per_square = if num_squares > 0.0 {
+                ((total_bet / num_squares) * 1_000_000_000.0) as u64
+            } else {
+                0
+            };
+
+            // Execute deploy transaction immediately!
+            if lamports_per_square > 0 {
+                info!("🚀 Deploying {} lamports per square to {} squares...", 
+                      lamports_per_square, bets.len());
+                
+                match self.client.deploy(lamports_per_square, squares_array) {
+                    Ok(signature) => {
+                        info!("✅ Deploy successful! Tx: {}", signature);
+                        
+                        // Log to database
+                        #[cfg(feature = "database")]
+                        if let Some(ref db) = self.db {
+                            let signal = Signal::new(
+                                SignalType::BetPlaced,
+                                BOT_NAME,
+                                serde_json::json!({
+                                    "round": current_round_id,
+                                    "squares": squares,
+                                    "total_bet_sol": total_bet,
+                                    "lamports_per_square": lamports_per_square,
+                                    "signature": signature.to_string(),
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                }),
+                            );
+                            db.send_signal(&signal).await.ok();
+                            
+                            db.set_state("last_betting_decision", serde_json::json!({
+                                "round": current_round_id,
+                                "squares": squares,
+                                "bets": bets.iter().map(|(s, a)| serde_json::json!({"square": s, "amount": a})).collect::<Vec<_>>(),
+                                "total_bet": total_bet,
+                                "signature": signature.to_string(),
+                                "timestamp": chrono::Utc::now().to_rfc3339(),
+                            })).await.ok();
+                        }
+                    }
+                    Err(e) => {
+                        error!("❌ Deploy failed: {}", e);
+                        
+                        #[cfg(feature = "database")]
+                        if let Some(ref db) = self.db {
+                            let signal = Signal::new(
+                                SignalType::Error,
+                                BOT_NAME,
+                                serde_json::json!({
+                                    "error": format!("{}", e),
+                                    "round": current_round_id,
+                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                }),
+                            );
+                            db.send_signal(&signal).await.ok();
+                        }
+                    }
+                }
             }
 
-            sleep(Duration::from_secs(30)).await;
+            // Wait for next round detection (60-second rounds, poll every 5 seconds)
+            sleep(Duration::from_secs(5)).await;
         }
 
         info!("🛑 Betting bot stopped");
