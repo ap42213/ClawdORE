@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ORE Block Selector - ClawdORE</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
         body {
             font-family: 'JetBrains Mono', 'Fira Code', monospace;
             background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0a0a0f 100%);
@@ -16,21 +14,9 @@
             margin: 0;
             padding: 20px;
         }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        h1 {
-            text-align: center;
-            color: #ffd700;
-            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
-            margin-bottom: 10px;
-        }
-        .subtitle {
-            text-align: center;
-            color: #888;
-            margin-bottom: 30px;
-        }
+        .container { max-width: 700px; margin: 0 auto; }
+        h1 { text-align: center; color: #ffd700; text-shadow: 0 0 20px rgba(255, 215, 0, 0.5); margin-bottom: 10px; }
+        .subtitle { text-align: center; color: #888; margin-bottom: 30px; }
         .card {
             background: rgba(20, 20, 30, 0.9);
             border: 1px solid #333;
@@ -38,13 +24,7 @@
             padding: 24px;
             margin-bottom: 20px;
         }
-        .card h2 {
-            color: #00ff88;
-            margin-top: 0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+        .card h2 { color: #00ff88; margin-top: 0; display: flex; align-items: center; gap: 10px; }
         .step-number {
             background: #ffd700;
             color: #000;
@@ -59,70 +39,56 @@
         }
         input[type="text"] {
             width: 100%;
-            padding: 12px 16px;
+            padding: 14px 18px;
             background: #0a0a15;
-            border: 1px solid #444;
+            border: 2px solid #444;
             border-radius: 8px;
             color: #fff;
             font-family: inherit;
-            font-size: 16px;
+            font-size: 18px;
             margin-bottom: 12px;
         }
-        input[type="text"]:focus {
-            outline: none;
-            border-color: #00ff88;
-            box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
-        }
+        input[type="text"]:focus { outline: none; border-color: #00ff88; box-shadow: 0 0 10px rgba(0, 255, 136, 0.3); }
         button {
             background: linear-gradient(135deg, #00ff88, #00cc6a);
             color: #000;
             border: none;
-            padding: 12px 24px;
+            padding: 14px 28px;
             border-radius: 8px;
             font-family: inherit;
-            font-size: 14px;
+            font-size: 16px;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.2s;
         }
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(0, 255, 136, 0.4);
-        }
-        button.secondary {
-            background: #333;
-            color: #fff;
-        }
-        button.secondary:hover {
-            background: #444;
-        }
-        .bookmarklet-code {
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0, 255, 136, 0.4); }
+        button.secondary { background: #333; color: #fff; }
+        button.secondary:hover { background: #444; }
+        button.gold { background: linear-gradient(135deg, #ffd700, #ff9500); }
+        button.copied { background: #22c55e !important; }
+        .code-box {
             background: #0a0a15;
-            border: 1px dashed #444;
+            border: 1px solid #333;
             border-radius: 8px;
             padding: 16px;
-            font-size: 12px;
-            word-break: break-all;
-            color: #888;
-            max-height: 100px;
+            font-size: 13px;
+            color: #aaa;
+            max-height: 150px;
             overflow-y: auto;
-            margin-bottom: 12px;
+            margin: 12px 0;
+            white-space: pre-wrap;
+            word-break: break-all;
         }
-        .preview-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 8px;
-            margin: 20px 0;
-        }
+        .preview-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 16px 0; }
         .preview-square {
             aspect-ratio: 1;
             background: #1a1a2e;
             border: 2px solid #333;
-            border-radius: 8px;
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 16px;
             font-weight: bold;
             color: #666;
             transition: all 0.2s;
@@ -131,65 +97,19 @@
             background: linear-gradient(135deg, #ffd700, #ff9500);
             border-color: #ffd700;
             color: #000;
-            box-shadow: 0 0 20px rgba(255, 215, 0, 0.4);
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.4);
         }
-        .instructions {
-            background: rgba(255, 215, 0, 0.1);
-            border: 1px solid rgba(255, 215, 0, 0.3);
-            border-radius: 8px;
-            padding: 16px;
-            margin-top: 16px;
-        }
-        .instructions h3 {
-            color: #ffd700;
-            margin-top: 0;
-        }
-        .instructions ol {
-            margin: 0;
-            padding-left: 20px;
-            color: #ccc;
-        }
-        .instructions li {
-            margin-bottom: 8px;
-        }
-        code {
-            background: #0a0a15;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-        .flex-row {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .status {
-            padding: 8px 16px;
-            border-radius: 8px;
-            margin-top: 12px;
-            display: none;
-        }
-        .status.success {
-            display: block;
-            background: rgba(0, 255, 136, 0.2);
-            border: 1px solid #00ff88;
-            color: #00ff88;
-        }
-        .status.error {
-            display: block;
-            background: rgba(255, 0, 0, 0.2);
-            border: 1px solid #ff4444;
-            color: #ff4444;
-        }
-        .tip {
-            color: #888;
-            font-size: 13px;
-            margin-top: 8px;
-        }
-        a {
-            color: #00ff88;
-        }
+        .flex-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+        .status { padding: 10px 16px; border-radius: 8px; margin-top: 12px; font-weight: bold; }
+        .status.success { background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; }
+        .status.error { background: rgba(255, 0, 0, 0.2); border: 1px solid #ff4444; color: #ff4444; }
+        .instructions { background: rgba(255, 215, 0, 0.1); border: 1px solid rgba(255, 215, 0, 0.3); border-radius: 8px; padding: 16px; }
+        .instructions h3 { color: #ffd700; margin-top: 0; }
+        .instructions ol { margin: 0; padding-left: 20px; color: #ccc; }
+        .instructions li { margin-bottom: 8px; }
+        code { background: #0a0a15; padding: 2px 6px; border-radius: 4px; }
+        a { color: #00ff88; }
+        .big-blocks { font-size: 28px; color: #ffd700; font-weight: bold; text-align: center; padding: 16px; background: rgba(255, 215, 0, 0.1); border-radius: 8px; margin: 12px 0; }
     </style>
 </head>
 <body>
@@ -197,149 +117,177 @@
         <h1>🦀 ORE Block Selector</h1>
         <p class="subtitle">Powered by ClawdORE - Autonomous Mining Swarm</p>
 
-        <!-- Step 1: Input blocks -->
-        <div class="card">
-            <h2><span class="step-number">1</span> Enter Block Numbers</h2>
-            <p>Paste the recommended blocks from ClawdORE (1-25, comma or space separated):</p>
+        <!-- Step 1: Get blocks from ClawdORE -->
+        <div class="card" style="border-color: #ffd700;">
+            <h2 style="color: #ffd700;"><span class="step-number">1</span> Get Recommended Blocks</h2>
+            <button class="gold" onclick="fetchClawdoreRecommendations()" style="width: 100%;">🔄 Fetch from ClawdORE</button>
+            <div id="clawdoreBlocks" class="big-blocks" style="display: none;"></div>
+            <div id="clawdoreStatus"></div>
+            
+            <p style="margin-top: 16px; color: #888;">Or enter blocks manually:</p>
             <input type="text" id="blockInput" placeholder="e.g., 5, 12, 17, 22, 25" />
             <div class="flex-row">
-                <button onclick="parseBlocks()">Preview Selection</button>
-                <button class="secondary" onclick="pasteFromClipboard()">📋 Paste from Clipboard</button>
+                <button onclick="parseBlocks()">Update Preview</button>
+                <button class="secondary" onclick="pasteFromClipboard()">📋 Paste</button>
             </div>
-            <div id="inputStatus" class="status"></div>
             
-            <div class="preview-grid" id="previewGrid">
-                <!-- Squares 1-25 will be generated here -->
-            </div>
+            <div class="preview-grid" id="previewGrid"></div>
+            <div id="inputStatus"></div>
         </div>
 
-        <!-- Step 2: Generate Bookmarklet -->
+        <!-- Step 2: Copy the script -->
         <div class="card">
-            <h2><span class="step-number">2</span> Use the Auto-Selector</h2>
-            <p>Two options to auto-select blocks on ore.supply:</p>
+            <h2><span class="step-number">2</span> Copy the Script</h2>
+            <p>Click to copy the selector script with your blocks:</p>
             
-            <h3 style="color: #ffd700; margin-top: 20px;">Option A: Bookmarklet (Recommended)</h3>
-            <p>Drag this button to your bookmarks bar:</p>
-            <p style="text-align: center; margin: 16px 0;">
-                <a href="javascript:(function(){const s=prompt('Enter blocks (1-25):','');if(!s)return;const b=s.match(/\d+/g).map(Number).filter(n=>n>=1&&n<=25);if(!b.length){alert('No valid blocks!');return;}let c=0;document.querySelectorAll('[data-square],[class*=square],[class*=cell],[class*=grid]>*,[class*=block]').forEach((e,i)=>{const n=parseInt(e.textContent)||i+1;if(b.includes(n)){e.click();c++;}});if(!c){const all=document.querySelectorAll('button,div[role=button]');all.forEach(e=>{b.forEach(n=>{if(e.textContent.trim()===String(n))e.click();});});}alert('Selected '+c+' blocks!');})()" 
-                   class="button" 
-                   style="display: inline-block; background: linear-gradient(135deg, #ffd700, #ff9500); color: #000; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold;"
-                   onclick="alert('Drag this to your bookmarks bar!'); return false;">
-                    ⚡ ORE Selector
-                </a>
-            </p>
+            <button id="copyScriptBtn" onclick="copyScript()" style="width: 100%; font-size: 18px; padding: 18px;">
+                📋 Copy Script to Clipboard
+            </button>
             
-            <h3 style="color: #ffd700; margin-top: 24px;">Option B: Console Script</h3>
-            <p>Copy this script and paste it in the browser console on ore.supply:</p>
-            <div class="bookmarklet-code" id="consoleScript">
-// ORE Block Selector by ClawdORE
-const blocks = [/* YOUR BLOCKS HERE */];
-blocks.forEach(num => {
-    // Try multiple selectors
-    document.querySelectorAll(`[data-index="${num-1}"], [data-square="${num}"]`).forEach(el => el.click());
-});
-            </div>
-            <button onclick="copyConsoleScript()">📋 Copy Script</button>
-            <button class="secondary" onclick="generateCustomScript()">Generate with My Blocks</button>
+            <div class="code-box" id="scriptPreview">// Select your blocks first...</div>
         </div>
 
-        <!-- Step 3: Instructions -->
+        <!-- Step 3: Run on ore.supply -->
         <div class="card">
-            <h2><span class="step-number">3</span> How to Use</h2>
+            <h2><span class="step-number">3</span> Run on ore.supply</h2>
             <div class="instructions">
-                <h3>Using the Bookmarklet:</h3>
                 <ol>
-                    <li>Drag the <strong>"⚡ ORE Selector"</strong> button above to your bookmarks bar</li>
                     <li>Go to <a href="https://ore.supply" target="_blank">ore.supply</a> and connect your wallet</li>
-                    <li>Navigate to the mining/deploy page with the 5x5 grid</li>
-                    <li>Click the bookmarklet in your bookmarks bar</li>
-                    <li>Enter the block numbers (e.g., <code>5, 12, 17, 22</code>)</li>
-                    <li>The blocks will be automatically selected!</li>
+                    <li>Navigate to the mining page with the 5x5 grid</li>
+                    <li>Press <code>F12</code> to open DevTools</li>
+                    <li>Click the <strong>Console</strong> tab</li>
+                    <li><strong>Paste</strong> the script (Ctrl+V) and press <strong>Enter</strong></li>
+                    <li>Your blocks will be selected! ✅</li>
                 </ol>
             </div>
-            <div class="instructions" style="margin-top: 16px;">
-                <h3>Using the Console Script:</h3>
-                <ol>
-                    <li>Enter your blocks in Step 1 above</li>
-                    <li>Click "Generate with My Blocks"</li>
-                    <li>Copy the generated script</li>
-                    <li>Go to <a href="https://ore.supply" target="_blank">ore.supply</a></li>
-                    <li>Open DevTools (F12) → Console tab</li>
-                    <li>Paste and run the script</li>
-                </ol>
-            </div>
-            <p class="tip">
-                <strong>Tip:</strong> If the auto-selector doesn't work, the ore.supply DOM structure may have changed. 
-                You can inspect the page (F12) to find the correct element selectors and update the script.
-            </p>
         </div>
 
-        <!-- Advanced -->
+        <!-- Bookmarklet Option -->
         <div class="card">
-            <h2>🔧 Advanced: Custom Selector</h2>
-            <p>If the default selectors don't work, enter a custom CSS selector for the squares:</p>
-            <input type="text" id="customSelector" placeholder="e.g., .grid-item, button.square, [data-cell]" />
-            <button onclick="generateAdvancedScript()">Generate Advanced Script</button>
-            <div class="bookmarklet-code" id="advancedScript" style="display: none; margin-top: 12px;"></div>
-        </div>
-
-        <!-- ClawdORE Integration -->
-        <div class="card" style="border-color: #ffd700;">
-            <h2 style="color: #ffd700;">🤖 Live from ClawdORE</h2>
-            <p>Get real-time block recommendations from the ClawdORE bot swarm:</p>
-            <button onclick="fetchClawdoreRecommendations()">🔄 Fetch Latest Recommendations</button>
-            <div id="clawdoreStatus" class="status"></div>
-            <div id="clawdoreBlocks" style="margin-top: 16px; display: none;">
-                <strong>Recommended Blocks:</strong>
-                <span id="recommendedBlocks" style="color: #ffd700; font-size: 20px;"></span>
+            <h2>⚡ Quick Option: Bookmarklet</h2>
+            <p>Create a bookmark that prompts for blocks every time:</p>
+            <button id="copyBookmarkletBtn" onclick="copyBookmarklet()" style="width: 100%;">
+                📋 Copy Bookmarklet Code
+            </button>
+            <div class="instructions" style="margin-top: 16px;">
+                <h3>To create the bookmarklet:</h3>
+                <ol>
+                    <li>Right-click your bookmarks bar → <strong>Add page</strong> (or Add bookmark)</li>
+                    <li>Name it: <code>ORE Selector</code></li>
+                    <li>In the URL field, <strong>paste</strong> the code you copied</li>
+                    <li>Save it</li>
+                    <li>On ore.supply, click the bookmark → enter your blocks!</li>
+                </ol>
             </div>
         </div>
     </div>
 
     <script>
-        // Initialize preview grid
+        let selectedBlocks = [];
+        
+        // Initialize grid
         function initGrid() {
             const grid = document.getElementById('previewGrid');
             grid.innerHTML = '';
             for (let i = 1; i <= 25; i++) {
-                const square = document.createElement('div');
-                square.className = 'preview-square';
-                square.id = `square-${i}`;
-                square.textContent = i;
-                grid.appendChild(square);
+                const sq = document.createElement('div');
+                sq.className = 'preview-square';
+                sq.id = `sq-${i}`;
+                sq.textContent = i;
+                grid.appendChild(sq);
             }
         }
         initGrid();
-
-        let selectedBlocks = [];
 
         function parseBlocks() {
             const input = document.getElementById('blockInput').value;
             const matches = input.match(/\d+/g);
             if (!matches) {
-                showStatus('inputStatus', 'No valid numbers found!', 'error');
+                showStatus('inputStatus', 'No numbers found', 'error');
                 return;
             }
             
-            selectedBlocks = matches
-                .map(n => parseInt(n))
-                .filter(n => n >= 1 && n <= 25);
+            selectedBlocks = [...new Set(matches.map(n => parseInt(n)).filter(n => n >= 1 && n <= 25))];
             
             if (selectedBlocks.length === 0) {
-                showStatus('inputStatus', 'Numbers must be between 1-25', 'error');
+                showStatus('inputStatus', 'Numbers must be 1-25', 'error');
                 return;
             }
 
-            // Update preview
-            document.querySelectorAll('.preview-square').forEach(sq => {
-                sq.classList.remove('selected');
-            });
-            selectedBlocks.forEach(num => {
-                const sq = document.getElementById(`square-${num}`);
+            updatePreview();
+            updateScript();
+            showStatus('inputStatus', `Selected: ${selectedBlocks.join(', ')}`, 'success');
+        }
+
+        function updatePreview() {
+            document.querySelectorAll('.preview-square').forEach(sq => sq.classList.remove('selected'));
+            selectedBlocks.forEach(n => {
+                const sq = document.getElementById(`sq-${n}`);
                 if (sq) sq.classList.add('selected');
             });
+        }
 
-            showStatus('inputStatus', `Selected ${selectedBlocks.length} blocks: ${selectedBlocks.join(', ')}`, 'success');
+        function updateScript() {
+            const script = `// ClawdORE Block Selector
+const blocks = [${selectedBlocks.join(', ')}];
+let clicked = 0;
+
+// Try multiple selection methods
+blocks.forEach(num => {
+    // Method 1: Data attributes
+    document.querySelectorAll(\`[data-index="\${num-1}"], [data-square="\${num}"], [data-cell="\${num-1}"]\`).forEach(el => { el.click(); clicked++; });
+});
+
+// Method 2: Grid children by index
+if (clicked === 0) {
+    document.querySelectorAll('[class*="grid"] > *, [class*="board"] > *').forEach((el, i) => {
+        if (blocks.includes(i + 1)) { el.click(); clicked++; }
+    });
+}
+
+// Method 3: Buttons with number text
+if (clicked === 0) {
+    document.querySelectorAll('button, [role="button"], div[class*="square"], div[class*="cell"]').forEach(el => {
+        const num = parseInt(el.textContent.trim());
+        if (blocks.includes(num)) { el.click(); clicked++; }
+    });
+}
+
+console.log('✅ Selected ' + clicked + ' blocks: ' + blocks.join(', '));`;
+            
+            document.getElementById('scriptPreview').textContent = script;
+        }
+
+        async function copyScript() {
+            if (selectedBlocks.length === 0) {
+                alert('Please select blocks first!');
+                return;
+            }
+            
+            const script = document.getElementById('scriptPreview').textContent;
+            await navigator.clipboard.writeText(script);
+            
+            const btn = document.getElementById('copyScriptBtn');
+            btn.textContent = '✅ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = '📋 Copy Script to Clipboard';
+                btn.classList.remove('copied');
+            }, 2000);
+        }
+
+        async function copyBookmarklet() {
+            const code = `javascript:(function(){const s=prompt('Enter blocks (1-25):','');if(!s)return;const b=[...new Set(s.match(/\\d+/g).map(Number).filter(n=>n>=1&&n<=25))];if(!b.length){alert('No valid blocks!');return;}let c=0;b.forEach(n=>{document.querySelectorAll(\`[data-index="\${n-1}"],[data-square="\${n}"],[data-cell="\${n-1}"]\`).forEach(e=>{e.click();c++;});});if(!c){document.querySelectorAll('[class*="grid"]>*,[class*="board"]>*').forEach((e,i)=>{if(b.includes(i+1)){e.click();c++;}});}if(!c){document.querySelectorAll('button,[role="button"]').forEach(e=>{if(b.includes(parseInt(e.textContent.trim()))){e.click();c++;}});}alert('Selected '+c+' blocks: '+b.join(', '));})()`;
+            
+            await navigator.clipboard.writeText(code);
+            
+            const btn = document.getElementById('copyBookmarkletBtn');
+            btn.textContent = '✅ Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => {
+                btn.textContent = '📋 Copy Bookmarklet Code';
+                btn.classList.remove('copied');
+            }, 2000);
         }
 
         async function pasteFromClipboard() {
@@ -347,154 +295,69 @@ blocks.forEach(num => {
                 const text = await navigator.clipboard.readText();
                 document.getElementById('blockInput').value = text;
                 parseBlocks();
-            } catch (err) {
-                showStatus('inputStatus', 'Could not read clipboard. Please paste manually.', 'error');
+            } catch (e) {
+                showStatus('inputStatus', 'Could not read clipboard', 'error');
             }
         }
 
-        function showStatus(elementId, message, type) {
-            const status = document.getElementById(elementId);
-            status.textContent = message;
-            status.className = 'status ' + type;
-        }
-
-        function copyConsoleScript() {
-            const blocks = selectedBlocks.length > 0 ? selectedBlocks : [1, 2, 3];
-            const script = `// ORE Block Selector by ClawdORE
-const blocks = [${blocks.join(', ')}];
-console.log('Selecting blocks:', blocks);
-
-// Method 1: Try data attributes
-let count = 0;
-blocks.forEach(num => {
-    document.querySelectorAll(\`[data-index="\${num-1}"], [data-square="\${num}"], [data-cell="\${num}"]\`).forEach(el => {
-        el.click();
-        count++;
-    });
-});
-
-// Method 2: Try grid children by index
-if (count === 0) {
-    const grids = document.querySelectorAll('[class*="grid"], [class*="board"]');
-    grids.forEach(grid => {
-        const children = grid.children;
-        blocks.forEach(num => {
-            if (children[num-1]) {
-                children[num-1].click();
-                count++;
-            }
-        });
-    });
-}
-
-// Method 3: Try buttons with matching text
-if (count === 0) {
-    document.querySelectorAll('button, [role="button"]').forEach(el => {
-        const text = el.textContent.trim();
-        if (blocks.includes(parseInt(text))) {
-            el.click();
-            count++;
-        }
-    });
-}
-
-console.log('Clicked', count, 'elements');`;
-
-            navigator.clipboard.writeText(script).then(() => {
-                alert('Script copied to clipboard!');
-            });
-        }
-
-        function generateCustomScript() {
-            if (selectedBlocks.length === 0) {
-                alert('Please enter blocks first!');
-                return;
-            }
-            
-            const script = document.getElementById('consoleScript');
-            script.textContent = `// ORE Block Selector by ClawdORE
-const blocks = [${selectedBlocks.join(', ')}];
-console.log('Selecting blocks:', blocks);
-
-// Try multiple methods to find and click squares
-let clicked = 0;
-
-// Method 1: Data attributes
-blocks.forEach(num => {
-    document.querySelectorAll(\`[data-index="\${num-1}"], [data-square="\${num}"]\`).forEach(el => {
-        el.click();
-        clicked++;
-    });
-});
-
-// Method 2: Grid children
-if (clicked === 0) {
-    document.querySelectorAll('[class*="grid"] > *').forEach((el, i) => {
-        if (blocks.includes(i + 1)) {
-            el.click();
-            clicked++;
-        }
-    });
-}
-
-console.log('Selected', clicked, 'blocks');`;
-        }
-
-        function generateAdvancedScript() {
-            const selector = document.getElementById('customSelector').value;
-            if (!selector) {
-                alert('Please enter a CSS selector!');
-                return;
-            }
-
-            const blocks = selectedBlocks.length > 0 ? selectedBlocks : [1, 2, 3, 4, 5];
-            const script = `// ORE Block Selector - Custom
-const blocks = [${blocks.join(', ')}];
-const elements = document.querySelectorAll('${selector}');
-console.log('Found', elements.length, 'elements');
-
-elements.forEach((el, index) => {
-    const num = index + 1; // 1-based indexing
-    if (blocks.includes(num)) {
-        el.click();
-        console.log('Clicked block', num);
-    }
-});`;
-
-            const advanced = document.getElementById('advancedScript');
-            advanced.style.display = 'block';
-            advanced.textContent = script;
+        function showStatus(id, msg, type) {
+            const el = document.getElementById(id);
+            el.textContent = msg;
+            el.className = 'status ' + type;
+            el.style.display = 'block';
         }
 
         async function fetchClawdoreRecommendations() {
-            const status = document.getElementById('clawdoreStatus');
             const blocksDiv = document.getElementById('clawdoreBlocks');
+            const statusDiv = document.getElementById('clawdoreStatus');
             
-            showStatus('clawdoreStatus', 'Fetching recommendations...', 'success');
+            statusDiv.textContent = 'Fetching...';
+            statusDiv.className = 'status success';
+            statusDiv.style.display = 'block';
             
             try {
-                // Try to fetch from the ClawdORE API
-                const response = await fetch('/api/ore');
-                if (!response.ok) throw new Error('API not available');
+                // Try /api/state first for consensus recommendation
+                let blocks = [];
                 
-                const data = await response.json();
-                
-                if (data.recommendedBlocks && data.recommendedBlocks.length > 0) {
-                    const blocks = data.recommendedBlocks;
-                    document.getElementById('blockInput').value = blocks.join(', ');
-                    parseBlocks();
-                    
-                    document.getElementById('recommendedBlocks').textContent = blocks.join(', ');
-                    blocksDiv.style.display = 'block';
-                    showStatus('clawdoreStatus', 'Recommendations loaded!', 'success');
-                } else {
-                    throw new Error('No recommendations available');
+                const stateRes = await fetch('/api/state');
+                if (stateRes.ok) {
+                    const data = await stateRes.json();
+                    if (data.consensus_recommendation?.squares?.length > 0) {
+                        blocks = data.consensus_recommendation.squares;
+                    }
                 }
-            } catch (err) {
-                showStatus('clawdoreStatus', 'Could not fetch recommendations. Enter blocks manually.', 'error');
-                blocksDiv.style.display = 'none';
+                
+                // Fallback to /api/ore
+                if (blocks.length === 0) {
+                    const oreRes = await fetch('/api/ore');
+                    if (oreRes.ok) {
+                        const data = await oreRes.json();
+                        if (data.recommended_blocks?.length > 0) {
+                            blocks = data.recommended_blocks;
+                        }
+                    }
+                }
+                
+                if (blocks.length > 0) {
+                    selectedBlocks = blocks;
+                    document.getElementById('blockInput').value = blocks.join(', ');
+                    blocksDiv.textContent = blocks.join(', ');
+                    blocksDiv.style.display = 'block';
+                    updatePreview();
+                    updateScript();
+                    statusDiv.textContent = '✅ Got ' + blocks.length + ' blocks!';
+                } else {
+                    statusDiv.textContent = 'No recommendations yet';
+                    statusDiv.className = 'status error';
+                }
+            } catch (e) {
+                statusDiv.textContent = 'Could not fetch - enter manually';
+                statusDiv.className = 'status error';
             }
         }
+
+        // Auto-fetch on load
+        fetchClawdoreRecommendations();
     </script>
 </body>
 </html>

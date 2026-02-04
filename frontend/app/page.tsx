@@ -54,6 +54,9 @@ export default function Home() {
   const [stats, setStats] = useState({ wins: 0, losses: 0, total: 0, winRate: '0', oreEarned: 0 })
   const [lastWinner, setLastWinner] = useState<{ round_id: number, winning_square: number } | null>(null)
   const [recentResults, setRecentResults] = useState<RoundResult[]>([])
+  const [recommendedBlocks, setRecommendedBlocks] = useState<number[]>([])
+  const [terminalPaused, setTerminalPaused] = useState(false)
+  const [copied, setCopied] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
   const seenRoundsRef = useRef<Set<number>>(new Set())
@@ -168,6 +171,10 @@ export default function Home() {
           
           if (data.consensus_recommendation) {
             const rec = data.consensus_recommendation
+            // Update recommended blocks for the copy panel
+            if (rec.squares && rec.squares.length > 0) {
+              setRecommendedBlocks(rec.squares)
+            }
             addLog('CLAWDOREDINATOR', 'decision', 
               `🎯 Consensus: squares [${rec.squares?.join(', ')}] (${Math.round((rec.confidence || 0) * 100)}% confidence)`)
           }
@@ -183,6 +190,11 @@ export default function Home() {
               setCurrentRound(oreData.round_id)
               addLog('ORE', 'info', 
                 `🆕 Round #${oreData.round_id} - ${oreData.total_deployed_sol?.toFixed(2) || 0} SOL total deployed`)
+            }
+            
+            // Update recommended blocks from API if we don't have consensus picks
+            if (oreData.recommended_blocks && oreData.recommended_blocks.length > 0) {
+              setRecommendedBlocks(prev => prev.length > 0 ? prev : oreData.recommended_blocks)
             }
             
             // Check for last winning square from blockchain
@@ -300,12 +312,21 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [])
 
-  // Auto-scroll terminal
+  // Auto-scroll terminal (only if not paused)
   useEffect(() => {
-    if (terminalRef.current) {
+    if (terminalRef.current && !terminalPaused) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight
     }
-  }, [logs])
+  }, [logs, terminalPaused])
+
+  // Copy blocks to clipboard
+  const copyBlocks = async () => {
+    if (recommendedBlocks.length === 0) return
+    const text = recommendedBlocks.join(', ')
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   // NO DEMO - only real data from API/database
   // The bots write real ORE blockchain data to the database
@@ -370,8 +391,34 @@ export default function Home() {
             ))}
           </div>
 
+          {/* RECOMMENDED BLOCKS - Easy to copy */}
+          <div className="mt-4 p-3 bg-purple-900/30 rounded-lg border border-purple-600/50">
+            <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">📋 Recommended Blocks</h2>
+            <div className="text-center">
+              {recommendedBlocks.length > 0 ? (
+                <>
+                  <div className="text-xl font-bold text-purple-300 mb-2">
+                    {recommendedBlocks.join(', ')}
+                  </div>
+                  <button
+                    onClick={copyBlocks}
+                    className={`w-full py-2 px-3 rounded text-sm font-bold transition-all ${
+                      copied 
+                        ? 'bg-green-600 text-white' 
+                        : 'bg-purple-600 hover:bg-purple-500 text-white'
+                    }`}
+                  >
+                    {copied ? '✓ Copied!' : '📋 Copy Blocks'}
+                  </button>
+                </>
+              ) : (
+                <div className="text-gray-500 text-sm">Waiting for recommendation...</div>
+              )}
+            </div>
+          </div>
+
           {/* Stats */}
-          <div className="mt-6 p-3 bg-gray-900/50 rounded-lg border border-gray-800">
+          <div className="mt-4 p-3 bg-gray-900/50 rounded-lg border border-gray-800">
             <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">Performance</h2>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
@@ -449,7 +496,19 @@ export default function Home() {
               <div className="w-3 h-3 rounded-full bg-green-500/80" />
             </div>
             <span className="text-xs text-gray-500">clawdore-swarm — live feed</span>
-            <div className="text-xs text-gray-600">{logs.length} events</div>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setTerminalPaused(!terminalPaused)}
+                className={`text-xs px-3 py-1 rounded transition-colors ${
+                  terminalPaused 
+                    ? 'bg-yellow-600 text-black font-bold' 
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                {terminalPaused ? '▶ Resume' : '⏸ Pause'}
+              </button>
+              <div className="text-xs text-gray-600">{logs.length} events</div>
+            </div>
           </div>
 
           {/* Terminal Content */}
