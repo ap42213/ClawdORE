@@ -87,7 +87,9 @@ export default function Home() {
           const signals = data.signals || []
           
           const now = new Date()
-          const heartbeats = signals.filter((s: any) => s.signal_type === 'Heartbeat')
+          const heartbeats = signals.filter((s: any) => 
+            s.signal_type === 'heartbeat' || s.signal_type === 'Heartbeat'
+          )
           
           setBots(prev => prev.map(bot => {
             const hb = heartbeats.find((h: any) => {
@@ -108,27 +110,53 @@ export default function Home() {
             return bot
           }))
 
-          signals.slice(0, 15).forEach((sig: any) => {
-            const botName = sig.source_bot.toUpperCase().replace('-BOT', '').replace('_BOT', '')
-            const mappedBot = Object.keys(BOT_COLORS).find(b => 
-              b.includes(botName) || botName.includes(b.replace('ORE', ''))
-            ) || 'SYSTEM'
+          signals.slice(0, 20).forEach((sig: any) => {
+            // Map source_bot names to display names
+            const srcBot = (sig.source_bot || 'system').toLowerCase()
+            let mappedBot = 'SYSTEM'
+            
+            if (srcBot.includes('coordinator') || srcBot.includes('clawd')) {
+              mappedBot = 'CLAWDOREDINATOR'
+            } else if (srcBot.includes('monitor')) {
+              mappedBot = 'MONITORE'
+            } else if (srcBot.includes('analytics')) {
+              mappedBot = 'ANALYTICORE'
+            } else if (srcBot.includes('parser') || srcBot.includes('parse')) {
+              mappedBot = 'PARSEORE'
+            } else if (srcBot.includes('learning') || srcBot.includes('learn')) {
+              mappedBot = 'LEARNORE'
+            } else if (srcBot.includes('betting') || srcBot.includes('bet')) {
+              mappedBot = 'BETORE'
+            } else if (srcBot.includes('miner') || srcBot.includes('mine')) {
+              mappedBot = 'MINEORE'
+            }
             
             let type: LogEntry['type'] = 'info'
             let message = sig.signal_type
             
-            if (sig.signal_type === 'Heartbeat') {
+            const sigType = sig.signal_type.toLowerCase()
+            
+            if (sigType === 'heartbeat') {
               type = 'info'
               message = '♥ heartbeat'
-            } else if (sig.signal_type === 'WinDetected') {
+            } else if (sigType === 'windetected' || sigType === 'win_detected') {
               type = 'win'
               message = `🏆 WIN DETECTED: Square ${sig.payload?.winning_square || '?'}`
-            } else if (sig.signal_type === 'DeployDetected') {
+            } else if (sigType === 'deploy_opportunity' || sigType === 'deploydetected') {
               type = 'action'
-              message = `📤 Deploy: ${sig.payload?.squares?.length || '?'} squares`
-            } else if (sig.signal_type === 'RoundStarted') {
+              message = `📤 Deploy opportunity: squares [${sig.payload?.squares?.join(', ') || sig.payload?.recommended_squares?.join(', ') || '?'}]`
+            } else if (sigType === 'round_started' || sigType === 'roundstarted') {
               type = 'decision'
               message = `🆕 Round ${sig.payload?.round_id || '?'} started`
+            } else if (sigType === 'consensus') {
+              type = 'ai'
+              message = `🎯 Consensus: ${sig.payload?.squares?.join(', ') || '?'} (${Math.round((sig.payload?.confidence || 0) * 100)}%)`
+            } else if (sigType === 'deploy') {
+              type = 'action'
+              message = `⚡ Deployed: squares [${sig.payload?.squares?.join(', ') || '?'}]`
+            } else {
+              // Show any other signal type
+              message = `${sig.signal_type}: ${JSON.stringify(sig.payload || {}).slice(0, 50)}`
             }
 
             setLogs(prev => {
@@ -461,17 +489,6 @@ export default function Home() {
             </div>
           )}
 
-          {/* ORE Stats Link */}
-          <div className="mt-4">
-            <a 
-              href="/ore-stats" 
-              className="block w-full p-3 bg-purple-900/30 rounded-lg border border-purple-600/50 hover:bg-purple-900/50 transition-colors text-center"
-            >
-              <div className="text-purple-400 font-bold text-sm">📊 ORE Stats</div>
-              <div className="text-xs text-gray-400 mt-1">Live on-chain data</div>
-            </a>
-          </div>
-          
           <div className="mt-6">
             <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-3">Legend</h2>
             <div className="space-y-1 text-xs">
