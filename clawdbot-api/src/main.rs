@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use clawdbot::ore_stats::OreStatsService;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -16,7 +17,7 @@ use tokio::{
     sync::RwLock,
 };
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Bot {
@@ -29,6 +30,8 @@ struct Bot {
 #[derive(Clone)]
 struct AppState {
     bots: Arc<RwLock<HashMap<String, BotProcess>>>,
+    ore_stats: Arc<RwLock<Option<OreStatsService>>>,
+    rpc_url: String,
 }
 
 struct BotProcess {
@@ -57,10 +60,29 @@ impl AppState {
                 },
             );
         }
+        
+        // Get RPC URL from environment or use default
+        let rpc_url = std::env::var("RPC_URL")
+            .unwrap_or_else(|_| "https://api.mainnet-beta.solana.com".to_string());
 
         Self {
             bots: Arc::new(RwLock::new(bots)),
+            ore_stats: Arc::new(RwLock::new(None)),
+            rpc_url,
         }
+    }
+    
+    async fn get_ore_stats(&self) -> Result<OreStatsService, String> {
+        // Lazy initialization of OreStatsService
+        {
+            let stats = self.ore_stats.read().await;
+            if stats.is_some() {
+                // Clone not possible, so we recreate
+            }
+        }
+        
+        OreStatsService::new(&self.rpc_url)
+            .map_err(|e| format!("Failed to create OreStatsService: {}", e))
     }
 }
 
@@ -78,6 +100,13 @@ async fn main() {
         .route("/api/bots/:id/start", post(start_bot))
         .route("/api/bots/:id/stop", post(stop_bot))
         .route("/api/bots/:id/status", get(bot_status))
+        // ORE Stats endpoints
+        .route("/api/ore/live", get(ore_live_round))
+        .route("/api/ore/stats", get(ore_full_stats))
+        .route("/api/ore/protocol", get(ore_protocol_stats))
+        .route("/api/ore/history", get(ore_round_history))
+        .route("/api/ore/squares", get(ore_square_analysis))
+        .route("/api/ore/recommendations", get(ore_recommendations))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -245,4 +274,151 @@ async fn bot_status(
         status: status.to_string(),
         uptime,
     }))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ORE STATS ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Get live round data (5x5 grid, deployments, miners, timing)
+async fn ore_live_round(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.get_ore_stats().await {
+        Ok(stats) => {
+            match stats.get_live_round() {
+                Ok(live) => Ok(Json(serde_json::json!(live))),
+                Err(e) => {
+                    error!("Failed to get live round: {}", e);
+                    Ok(Json(serde_json::json!({
+                        "error": format!("Failed to fetch live round: {}", e)
+                    })))
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to create OreStatsService: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Get comprehensive ORE stats (live + protocol + history)
+async fn ore_full_stats(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.get_ore_stats().await {
+        Ok(stats) => {
+            match stats.get_full_stats() {
+                Ok(full) => Ok(Json(serde_json::json!(full))),
+                Err(e) => {
+                    error!("Failed to get full stats: {}", e);
+                    Ok(Json(serde_json::json!({
+                        "error": format!("Failed to fetch stats: {}", e)
+                    })))
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to create OreStatsService: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Get protocol-wide stats (treasury, motherlode, staking)
+async fn ore_protocol_stats(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.get_ore_stats().await {
+        Ok(stats) => {
+            match stats.get_protocol_stats() {
+                Ok(protocol) => Ok(Json(serde_json::json!(protocol))),
+                Err(e) => {
+                    error!("Failed to get protocol stats: {}", e);
+                    Ok(Json(serde_json::json!({
+                        "error": format!("Failed to fetch protocol stats: {}", e)
+                    })))
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to create OreStatsService: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Get round history (last 20 completed rounds)
+async fn ore_round_history(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.get_ore_stats().await {
+        Ok(stats) => {
+            match stats.get_round_history(20) {
+                Ok(history) => Ok(Json(serde_json::json!({
+                    "rounds": history,
+                    "count": history.len()
+                }))),
+                Err(e) => {
+                    error!("Failed to get round history: {}", e);
+                    Ok(Json(serde_json::json!({
+                        "error": format!("Failed to fetch history: {}", e)
+                    })))
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to create OreStatsService: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Get square analysis (win rates, patterns)
+async fn ore_square_analysis(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.get_ore_stats().await {
+        Ok(stats) => {
+            match stats.analyze_squares(100) {
+                Ok(analysis) => Ok(Json(serde_json::json!({
+                    "squares": analysis
+                }))),
+                Err(e) => {
+                    error!("Failed to analyze squares: {}", e);
+                    Ok(Json(serde_json::json!({
+                        "error": format!("Failed to analyze squares: {}", e)
+                    })))
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to create OreStatsService: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
+/// Get bot recommendations (which squares to deploy on)
+async fn ore_recommendations(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match state.get_ore_stats().await {
+        Ok(stats) => {
+            match stats.get_bot_recommendations() {
+                Ok(recs) => Ok(Json(serde_json::json!(recs))),
+                Err(e) => {
+                    error!("Failed to get recommendations: {}", e);
+                    Ok(Json(serde_json::json!({
+                        "error": format!("Failed to get recommendations: {}", e)
+                    })))
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to create OreStatsService: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }

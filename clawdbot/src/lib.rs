@@ -13,6 +13,7 @@ pub mod db;
 pub mod ore_strategy;
 pub mod learning_engine;
 pub mod ai_advisor;
+pub mod ore_stats;
 
 pub use bot::*;
 pub use client::*;
@@ -26,3 +27,4 @@ pub use blockchain_parser::*;
 pub use ore_strategy::*;
 pub use learning_engine::*;
 pub use ai_advisor::*;
+pub use ore_stats::*;
