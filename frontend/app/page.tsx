@@ -57,6 +57,7 @@ export default function Home() {
   const [recommendedBlocks, setRecommendedBlocks] = useState<number[]>([])
   const [terminalPaused, setTerminalPaused] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [wallet, setWallet] = useState<{ address: string; sol: number; usdc: number } | null>(null)
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
   const seenRoundsRef = useRef<Set<number>>(new Set())
@@ -76,6 +77,24 @@ export default function Home() {
     const d = new Date(iso)
     return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
+
+  // Fetch wallet balance
+  useEffect(() => {
+    const fetchWallet = async () => {
+      try {
+        const res = await fetch('/api/wallet')
+        if (res.ok) {
+          const data = await res.json()
+          setWallet(data)
+        }
+      } catch (e) {
+        console.error('Wallet fetch error:', e)
+      }
+    }
+    fetchWallet()
+    const walletInterval = setInterval(fetchWallet, 60000) // Update every minute
+    return () => clearInterval(walletInterval)
+  }, [])
 
   // Fetch live data from API
   useEffect(() => {
@@ -443,6 +462,36 @@ export default function Home() {
                 <div className="text-gray-500 text-sm">Waiting for recommendation...</div>
               )}
             </div>
+          </div>
+
+          {/* Agent Wallet */}
+          <div className="mt-4 p-3 bg-gradient-to-br from-purple-900/30 to-indigo-900/30 rounded-lg border border-purple-600/50">
+            <h2 className="text-xs text-gray-500 uppercase tracking-wider mb-2">🔐 Agent Wallet</h2>
+            {wallet ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400 text-xs">SOL</span>
+                  <span className="text-purple-400 font-bold">{wallet.sol.toFixed(4)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400 text-xs">USDC</span>
+                  <span className="text-green-400 font-bold">${wallet.usdc.toFixed(2)}</span>
+                </div>
+                <div className="mt-2 pt-2 border-t border-gray-700">
+                  <a 
+                    href={`https://solscan.io/account/${wallet.address}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-gray-500 hover:text-purple-400 truncate block"
+                    title={wallet.address}
+                  >
+                    {wallet.address.slice(0, 8)}...{wallet.address.slice(-6)}
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="text-gray-500 text-xs">Loading wallet...</div>
+            )}
           </div>
 
           {/* Stats */}
