@@ -69,20 +69,20 @@ export default function OreStatsPage() {
   const [error, setError] = useState<string | null>(null)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://clawdore-production.up.railway.app'
-
+  // Use local API routes (they'll fetch from Solana directly)
   const fetchData = async () => {
     try {
       const [liveRes, protocolRes, historyRes, analysisRes] = await Promise.all([
-        fetch(`${API_URL}/api/ore/live`),
-        fetch(`${API_URL}/api/ore/protocol`),
-        fetch(`${API_URL}/api/ore/history`),
-        fetch(`${API_URL}/api/ore/squares`),
+        fetch('/api/ore/live'),
+        fetch('/api/ore/protocol'),
+        fetch('/api/ore/history'),
+        fetch('/api/ore/squares'),
       ])
 
       if (liveRes.ok) {
         const data = await liveRes.json()
         if (!data.error) setLiveRound(data)
+        else setError(data.error)
       }
       
       if (protocolRes.ok) {
