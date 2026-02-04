@@ -92,6 +92,12 @@
             font-weight: bold;
             color: #666;
             transition: all 0.2s;
+            cursor: pointer;
+            user-select: none;
+        }
+        .preview-square:hover {
+            border-color: #ffd700;
+            background: #2a2a3e;
         }
         .preview-square.selected {
             background: linear-gradient(135deg, #ffd700, #ff9500);
@@ -124,13 +130,15 @@
             <div id="clawdoreBlocks" class="big-blocks" style="display: none;"></div>
             <div id="clawdoreStatus"></div>
             
-            <p style="margin-top: 16px; color: #888;">Or enter blocks manually:</p>
+            <p style="margin-top: 16px; color: #888;">Or click squares below or type manually:</p>
             <input type="text" id="blockInput" placeholder="e.g., 5, 12, 17, 22, 25" />
             <div class="flex-row">
-                <button onclick="parseBlocks()">Update Preview</button>
+                <button onclick="parseBlocks()">Update from Text</button>
                 <button class="secondary" onclick="pasteFromClipboard()">📋 Paste</button>
+                <button class="secondary" onclick="clearBlocks()">✕ Clear</button>
             </div>
             
+            <p style="margin-top: 12px; color: #666; font-size: 13px;">👆 Click squares to select/deselect:</p>
             <div class="preview-grid" id="previewGrid"></div>
             <div id="inputStatus"></div>
         </div>
@@ -185,7 +193,7 @@
     <script>
         let selectedBlocks = [];
         
-        // Initialize grid
+        // Initialize grid with click handlers
         function initGrid() {
             const grid = document.getElementById('previewGrid');
             grid.innerHTML = '';
@@ -194,10 +202,44 @@
                 sq.className = 'preview-square';
                 sq.id = `sq-${i}`;
                 sq.textContent = i;
+                sq.onclick = () => toggleBlock(i);
                 grid.appendChild(sq);
             }
         }
         initGrid();
+
+        // Toggle a block on/off when clicked
+        function toggleBlock(num) {
+            if (selectedBlocks.includes(num)) {
+                selectedBlocks = selectedBlocks.filter(n => n !== num);
+            } else {
+                selectedBlocks.push(num);
+            }
+            selectedBlocks.sort((a, b) => a - b);
+            
+            // Update input field
+            document.getElementById('blockInput').value = selectedBlocks.join(', ');
+            
+            // Update UI
+            updatePreview();
+            updateScript();
+            
+            if (selectedBlocks.length > 0) {
+                showStatus('inputStatus', `Selected: ${selectedBlocks.join(', ')}`, 'success');
+            } else {
+                document.getElementById('inputStatus').style.display = 'none';
+            }
+        }
+
+        // Clear all selections
+        function clearBlocks() {
+            selectedBlocks = [];
+            document.getElementById('blockInput').value = '';
+            updatePreview();
+            updateScript();
+            document.getElementById('inputStatus').style.display = 'none';
+            document.getElementById('clawdoreBlocks').style.display = 'none';
+        }
 
         function parseBlocks() {
             const input = document.getElementById('blockInput').value;
