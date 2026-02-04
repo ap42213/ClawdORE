@@ -19,6 +19,8 @@ const BOT_COLORS: Record<string, string> = {
   'SYSTEM': '#64748b',
 }
 
+const STORAGE_KEY = 'test20_data'
+
 export default function Test20Page() {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [currentRound, setCurrentRound] = useState<number>(0)
@@ -27,12 +29,55 @@ export default function Test20Page() {
   const [lastWinner, setLastWinner] = useState<{ round_id: number, winning_square: number } | null>(null)
   const [connected, setConnected] = useState(false)
   const [terminalPaused, setTerminalPaused] = useState(false)
+  const [initialized, setInitialized] = useState(false)
   const terminalRef = useRef<HTMLDivElement>(null)
   const logIdRef = useRef(0)
   const startedRef = useRef(false)
   // Track which squares were locked for which round
   const lockedSquaresRef = useRef<Map<number, number[]>>(new Map())
   const processedResultsRef = useRef<Set<number>>(new Set())
+
+  // Load from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) {
+        const data = JSON.parse(saved)
+        if (data.stats) setStats(data.stats)
+        if (data.processedResults) {
+          processedResultsRef.current = new Set(data.processedResults)
+        }
+        if (data.lockedSquares) {
+          lockedSquaresRef.current = new Map(data.lockedSquares)
+        }
+        if (data.currentRound) setCurrentRound(data.currentRound)
+        if (data.logs) {
+          setLogs(data.logs)
+          logIdRef.current = data.logs.length
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load saved data:', e)
+    }
+    setInitialized(true)
+  }, [])
+
+  // Save to localStorage when stats change
+  useEffect(() => {
+    if (!initialized) return
+    try {
+      const data = {
+        stats,
+        processedResults: Array.from(processedResultsRef.current),
+        lockedSquares: Array.from(lockedSquaresRef.current.entries()),
+        currentRound,
+        logs: logs.slice(-100), // Keep last 100 logs
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    } catch (e) {
+      console.error('Failed to save data:', e)
+    }
+  }, [stats, currentRound, logs, initialized])
 
   const addLog = (bot: string, type: LogEntry['type'], message: string) => {
     const entry: LogEntry = {
@@ -45,6 +90,16 @@ export default function Test20Page() {
     setLogs(prev => [...prev.slice(-200), entry])
   }
 
+  const resetStats = () => {
+    setStats({ wins: 0, losses: 0, total: 0, winRate: '0' })
+    processedResultsRef.current = new Set()
+    lockedSquaresRef.current = new Map()
+    setLogs([])
+    logIdRef.current = 0
+    localStorage.removeItem(STORAGE_KEY)
+    addLog('SYSTEM', 'info', '🔄 Stats reset')
+  }
+
   const formatTime = (iso: string) => {
     const d = new Date(iso)
     return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -52,14 +107,20 @@ export default function Test20Page() {
 
   // Startup message - only once
   useEffect(() => {
-    if (!startedRef.current) {
+    if (!startedRef.current && initialized) {
       startedRef.current = true
-      addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
+      if (stats.total > 0) {
+        addLog('SYSTEM', 'info', `📊 Restored: ${stats.wins}W/${stats.losses}L (${stats.winRate}%)`)
+      } else {
+        addLog('SYSTEM', 'info', `🚀 20-Square Test Mode Started (${SQUARE_COUNT}/25 = 80% expected win rate)`)
+      }
     }
-  }, [])
+  }, [initialized])
 
   // Fetch live data
   useEffect(() => {
+    if (!initialized) return
+    
     const fetchData = async () => {
       try {
         // Fetch current state
@@ -319,6 +380,14 @@ export default function Test20Page() {
               </div>
             </div>
           )}
+
+          {/* Reset button */}
+          <button 
+            onClick={resetStats}
+            className="w-full mb-4 px-3 py-2 bg-red-900/30 border border-red-800/50 rounded-lg text-red-400 text-xs hover:bg-red-900/50 transition-colors"
+          >
+            🔄 Reset Stats
+          </button>
 
           {/* Back link */}
           <a href="/" className="block text-center text-purple-400 hover:underline text-sm">
